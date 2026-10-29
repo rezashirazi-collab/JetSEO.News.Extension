@@ -92,7 +92,7 @@ function show(name) {
   tab = name;
   for (const b of tabsNav.querySelectorAll("button")) b.classList.toggle("on", b.dataset.tab === name);
   const id = ++loadId;
-  ({ topics: showTopics, gap: showGap, trends: showTrends, settings: showSettings })[name](id);
+  ({ topics: showTopics, gap: showGap, mine: showMine, trends: showTrends, settings: showSettings })[name](id);
 }
 
 tabsNav.addEventListener("click", (e) => {
@@ -161,6 +161,79 @@ async function showGap(id) {
     (stories.length ? stories.map((s) => storyCard(s, res.data.now, `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>`)).join("") : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
   chrome.runtime.sendMessage({ type: "news-gap-seen", ids: stories.map((s) => `${site.id}:${s.id}`) }).catch(() => {});
   document.getElementById("gap-count").hidden = true;
+}
+
+// «۲ ساعت و ۵ دقیقه»
+function duration(minutes) {
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return h ? `${fa(h)} ساعت${m ? ` و ${fa(m)} دقیقه` : ""}` : `${fa(m)} دقیقه`;
+}
+
+function lagBadge(item) {
+  if (item.lagMinutes == null) return `<span class="badge">رقیبی کار نکرده</span>`;
+  if (item.lagMinutes <= 0) return `<span class="badge ok">اول شما منتشر کردید</span>`;
+  return `<span class="badge ${item.lagMinutes >= 60 ? "late" : "watch"}">${duration(item.lagMinutes)} بعد از ${esc(item.firstCompetitor)}</span>`;
+}
+
+// «مطالب ما»: the site's own articles of the window, how far behind its competitors each was, and the news SEO check
+// (CoreApi api/News/check: only URLs on the team's own sites).
+async function showMine(id) {
+  const sites = state?.sites ?? [];
+  if (!sites.length) {
+    main.innerHTML = `<div class="center"><p>هنوز سایتی انتخاب نشده است.</p></div>`;
+    return;
+  }
+  const site = sites.find((s) => s.id === gapSite) ?? sites[0];
+  main.innerHTML = `<div class="controls">
+      ${sites.length > 1 ? `<select id="msite" aria-label="سایت">${sites.map((s) => `<option value="${s.id}" ${s.id === site.id ? "selected" : ""}>${esc(s.domain)}</option>`).join("")}</select>` : `<strong dir="ltr">${esc(site.domain)}</strong>`}
+    </div>
+    <form id="checkform" class="controls">
+      <input id="checkurl" type="url" dir="ltr" placeholder="آدرس یک خبر سایت شما" style="flex:1;min-width:0" aria-label="آدرس خبر" required />
+      <button class="btn ghost" type="submit">بررسی سئو</button>
+    </form>
+    <div id="checkout"></div>
+    <div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
+  const msite = document.getElementById("msite");
+  if (msite) msite.onchange = (e) => { gapSite = +e.target.value; show("mine"); };
+  document.getElementById("checkform").onsubmit = (e) => {
+    e.preventDefault();
+    runCheck(document.getElementById("checkurl").value.trim(), document.getElementById("checkout"));
+  };
+  const list = document.getElementById("list");
+  if (!site.hasFeed) { list.innerHTML = `<div class="empty">فید سایت شما ثبت نشده است.</div>`; return; }
+  const res = await newsApi(`mine?siteId=${site.id}&hours=24`);
+  if (id !== loadId) return;
+  if (res.status === 403) return start();
+  if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
+  const items = res.data.items ?? [];
+  const covered = items.filter((i) => i.lagMinutes != null);
+  const late = covered.filter((i) => i.lagMinutes > 0);
+  const summary = covered.length
+    ? `در ${fa(covered.length)} خبر که رقبا هم کار کردند، ${fa(covered.length - late.length)} بار اول شما بودید` +
+      (late.length ? `؛ بقیه به‌طور میانه ${duration(late.map((i) => i.lagMinutes).sort((a, b) => a - b)[Math.floor(late.length / 2)])} دیرتر.` : ".")
+    : "";
+  list.innerHTML = `<p class="muted">خبرهای ۲۴ ساعت اخیر ${esc(res.data.site)}. ${summary}</p>` + (items.length ? items.map((i, n) => `<article class="card">
+      <h3><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a></h3>
+      <div class="meta">${lagBadge(i)} <span>${ago(i.at, res.data.now)}</span>
+        <button class="btn ghost" type="button" data-check="${n}" style="padding:0 10px">بررسی سئو</button></div>
+      <div data-out="${n}"></div>
+    </article>`).join("") : `<div class="empty">در ۲۴ ساعت اخیر خبری از این سایت خوانده نشده است.</div>`);
+  list.onclick = (e) => {
+    const b = e.target.closest("button[data-check]");
+    if (b) runCheck(items[+b.dataset.check].url, list.querySelector(`[data-out="${b.dataset.check}"]`));
+  };
+}
+
+async function runCheck(url, out) {
+  out.innerHTML = `<div class="muted">در حال بررسی…</div>`;
+  const res = await newsApi(`check?url=${encodeURIComponent(url)}`);
+  const reasons = { "not-your-site": "فقط خبرهای سایت‌های تیم شما بررسی می‌شوند.", "bad-url": "آدرس معتبر نیست.", "too-many": "در این ساعت بیش از حد بررسی شده است؛ کمی بعد." };
+  if (res.status !== 200) { out.innerHTML = `<div class="muted">${esc(reasons[res.data?.reason] ?? "بررسی انجام نشد.")}</div>`; return; }
+  const r = res.data;
+  if (r.error) { out.innerHTML = `<div class="muted">${esc(r.error)}</div>`; return; }
+  const icon = { ok: "✓", warn: "!", bad: "✕" };
+  out.innerHTML = `<div class="checks"><div class="muted">${fa(r.ok)} از ${fa(r.total)} مورد درست است.</div>` +
+    r.checks.map((c) => `<div class="check ${esc(c.level)}"><b>${icon[c.level] ?? ""} ${esc(c.title)}</b> <span>${esc(c.message)}</span></div>`).join("") + `</div>`;
 }
 
 // Google's daily searches in Iran (free for every signed-in user), read by the browser itself like the JetSEO extension.

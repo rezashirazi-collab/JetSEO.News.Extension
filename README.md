@@ -1,8 +1,9 @@
 # جت‌سئو نیوز (JetSEO News)
 
-A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel with four tabs:
+A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel with five tabs:
 - **سوژه‌های داغ:** stories that several Iranian news sites are telling right now.
 - **شکاف پوشش:** stories your competitors published and your site did not.
+- **مطالب ما:** your site's articles of the last 24 hours, how many minutes after the first competitor each came out, and a news SEO check of any of them (title, description, H1, canonical, robots, the image Discover needs, NewsArticle data, publish time, language).
 - **ترند گوگل:** today's searches in Iran.
 - **تنظیمات:** your own filters and alerts.
 
@@ -36,6 +37,8 @@ Chrome 116 or later.
   - `state`: who you are for the module (owner, member or none), your tier and end date, and the team's sites.
   - `topics?hours=&minSources=`: hot stories, with the team filters already applied.
   - `gap?siteId=&hours=`: a site's coverage gap.
+  - `mine?siteId=&hours=`: the site's own articles, with each one's lag behind the first competitor.
+  - `check?url=`: news SEO check of one article, for the team's own sites only.
   - A 401 means signed out; the extension forgets the token. A 403 `{reason: "no-module"}` means no subscription; only Google Trends stays.
 - **Google Trends:** read by the browser itself, from `https://trends.google.com/trending/rss?geo=IR`.
 
