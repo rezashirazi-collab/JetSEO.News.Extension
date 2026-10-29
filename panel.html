@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>جت‌سئو نیوز</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <header class="top">
+    <img src="icons/icon-32.png" alt="" width="22" height="22" />
+    <strong>جت‌سئو نیوز</strong>
+    <span id="who" class="muted"></span>
+    <button id="refresh" class="icon" type="button" title="به‌روزرسانی" aria-label="به‌روزرسانی">⟳</button>
+  </header>
+  <div id="banner" hidden></div>
+  <nav id="tabs" class="tabs" hidden aria-label="بخش‌ها">
+    <button type="button" data-tab="topics" class="on">سوژه‌های داغ</button>
+    <button type="button" data-tab="gap">شکاف پوشش <span id="gap-count" class="count" hidden></span></button>
+    <button type="button" data-tab="trends">ترند گوگل</button>
+    <button type="button" data-tab="settings">تنظیمات</button>
+  </nav>
+  <main id="main" aria-live="polite"></main>
+  <script src="api.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

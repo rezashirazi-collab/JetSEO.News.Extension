@@ -1,0 +1,6 @@
+# the private key of manifest.json's "key" and packed builds never go in this public repository
+*.pem
+*.crx
+*.zip
+.DS_Store
+Thumbs.db
