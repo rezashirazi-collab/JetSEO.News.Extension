@@ -1,15 +1,16 @@
 # جت‌سئو نیوز (JetSEO News)
 
-A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel with five tabs:
+A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel with six tabs:
 - **سوژه‌های داغ:** stories that several Iranian news sites are telling right now.
 - **شکاف پوشش:** stories your competitors published and your site did not.
 - **مطالب ما:** your site's articles of the last 24 hours, how many minutes after the first competitor each came out, and a news SEO check of any of them (title, description, H1, canonical, robots, the image Discover needs, NewsArticle data, publish time, language).
 - **ترند گوگل:** today's searches in Iran.
+- **ترند ویکی‌پدیا:** Persian Wikipedia articles whose reads jumped yesterday (at least twice the day before and the week before), or simply the most read.
 - **تنظیمات:** your own filters and alerts.
 
 While Chrome is open, the extension checks every 5 minutes and notifies new coverage gaps and stories with a watched keyword.
 
-The hot stories, the coverage gap and the alerts come with the «جت‌سئو نیوز» module, bought in the JetSEO panel (`/panel/NewsModule`). There the subscription owner also manages team members, sites, competitors and team filters. Google Trends is free for every signed-in JetSEO user.
+The hot stories, the coverage gap and the alerts come with the «جت‌سئو نیوز» module, bought in the JetSEO panel (`/panel/NewsModule`). There the subscription owner also manages team members, sites, competitors and team filters. Google Trends and Wikipedia trends are free for every signed-in JetSEO user.
 
 ## Install (development)
 
@@ -39,8 +40,9 @@ Chrome 116 or later.
   - `gap?siteId=&hours=`: a site's coverage gap.
   - `mine?siteId=&hours=`: the site's own articles, with each one's lag behind the first competitor.
   - `check?url=`: news SEO check of one article, for the team's own sites only.
-  - A 401 means signed out; the extension forgets the token. A 403 `{reason: "no-module"}` means no subscription; only Google Trends stays.
+  - A 401 means signed out; the extension forgets the token. A 403 `{reason: "no-module"}` means no subscription; only Google Trends and Wikipedia trends stay.
 - **Google Trends:** read by the browser itself, from `https://trends.google.com/trending/rss?geo=IR`.
+- **Wikipedia trends:** read by the browser itself, from `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/fa.wikipedia/all-access/YYYY/MM/DD` (CORS is open, so no host permission).
 
 ## Release
 

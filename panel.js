@@ -53,11 +53,11 @@ async function start() {
   };
   const a = state.access;
   tabsNav.hidden = false;
-  for (const b of tabsNav.querySelectorAll("button")) b.hidden = !a && b.dataset.tab !== "trends";
+  for (const b of tabsNav.querySelectorAll("button")) b.hidden = !a && b.dataset.tab !== "trends" && b.dataset.tab !== "wiki";
   if (!a) {
     tab = "trends";
     const ended = state.endedAt ? "اشتراک جت‌سئو نیوز شما تمام شده است." : "جت‌سئو نیوز برای حساب شما فعال نیست.";
-    setBanner(`${ended} ترند گوگل رایگان است؛ سوژه‌های داغ رسانه‌ها و شکاف پوشش با اشتراک. <a href="${safeUrl(state.panelUrl)}" target="_blank" rel="noopener">${state.endedAt ? "تمدید" : "خرید یا ۷ روز رایگان"}</a>`, !!state.endedAt);
+    setBanner(`${ended} ترند گوگل و ویکی‌پدیا رایگان است؛ سوژه‌های داغ رسانه‌ها و شکاف پوشش با اشتراک. <a href="${safeUrl(state.panelUrl)}" target="_blank" rel="noopener">${state.endedAt ? "تمدید" : "خرید یا ۷ روز رایگان"}</a>`, !!state.endedAt);
   } else if (a.daysLeft <= 7) {
     const text = a.role === "owner"
       ? `${a.trial ? "دوره آزمایشی" : "اشتراک"} شما ${fa(a.daysLeft)} روز دیگر تمام می‌شود. <a href="${safeUrl(state.panelUrl)}" target="_blank" rel="noopener">تمدید</a>`
@@ -92,7 +92,7 @@ function show(name) {
   tab = name;
   for (const b of tabsNav.querySelectorAll("button")) b.classList.toggle("on", b.dataset.tab === name);
   const id = ++loadId;
-  ({ topics: showTopics, gap: showGap, mine: showMine, trends: showTrends, settings: showSettings })[name](id);
+  ({ topics: showTopics, gap: showGap, mine: showMine, trends: showTrends, wiki: showWiki, settings: showSettings })[name](id);
 }
 
 tabsNav.addEventListener("click", (e) => {
@@ -261,6 +261,53 @@ async function showTrends(id) {
       <div class="meta">${t.traffic ? `<span class="badge">${esc(t.traffic)} جستجو</span>` : ""}</div>
       ${t.news.length ? `<ul class="muted" style="margin:4px 0 0;padding-inline-start:16px">${t.news.map((n) => `<li><a href="${safeUrl(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a></li>`).join("")}</ul>` : ""}
     </article>`).join("") : `<div class="empty">ترندی نیست.</div>`);
+}
+
+// Persian Wikipedia's most-read articles (free, like Google Trends), from Wikimedia's pageviews API (CORS open, no
+// host permission). «رو به رشد» keeps the articles read at least twice as much as the day before and the week
+// before, which drops the evergreen pages; an article missing from an older top-1000 counts as that list's last.
+let wikiAll = false;
+const WIKI_SKIP = /^(ویژه|رده|ویکی‌پدیا|پرونده|الگو|کاربر|راهنما|درگاه|مدیاویکی|پودمان|بحث[^:]*|Special|File|Category|Template|User|Wikipedia|Help|Portal|Talk|Module):|^(صفحهٔ_اصلی|-|Main_Page)$/;
+
+async function wikiTop(daysAgo) {
+  const day = new Date(Date.now() - daysAgo * 864e5).toISOString().slice(0, 10).replace(/-/g, "/");
+  const response = await fetch(`https://wikimedia.org/api/rest_v1/metrics/pageviews/top/fa.wikipedia/all-access/${day}`, { credentials: "omit" });
+  if (!response.ok) throw new Error(response.status);
+  return { day, articles: (await response.json()).items[0].articles };
+}
+
+async function showWiki(id) {
+  main.innerHTML = `<div class="controls">
+      <select id="wmode" aria-label="نوع فهرست"><option value="0">رو به رشد</option><option value="1" ${wikiAll ? "selected" : ""}>پربازدیدترین</option></select>
+    </div><div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
+  document.getElementById("wmode").onchange = (e) => { wikiAll = e.target.value === "1"; show("wiki"); };
+  let data = null;
+  // yesterday (UTC) is published a few hours after midnight; until then, the day before
+  for (const offset of [1, 2]) {
+    try {
+      data = await Promise.all([wikiTop(offset), wikiTop(offset + 1), wikiTop(offset + 7)]);
+      break;
+    } catch (error) { /* next offset */ }
+  }
+  if (id !== loadId) return;
+  const list = document.getElementById("list");
+  if (!data) { list.innerHTML = `<div class="empty">آمار ویکی‌پدیا بارگذاری نشد.</div>`; return; }
+  const [now, prev, week] = data;
+  const before = (top) => { const views = new Map(top.articles.map((a) => [a.article, a.views])); return (t) => views.get(t) ?? top.articles.at(-1).views; };
+  const prevViews = before(prev), weekViews = before(week);
+  let items = now.articles.filter((a) => !WIKI_SKIP.test(a.article)).map((a) => ({ ...a, base: Math.max(prevViews(a.article), weekViews(a.article)) }));
+  if (!wikiAll) items = items.filter((a) => a.views >= 2 * a.base);
+  const date = new Date(now.day.replace(/\//g, "-")).toLocaleDateString("fa-IR", { timeZone: "UTC" });
+  list.innerHTML = `<p class="muted">${wikiAll ? "پربازدیدترین" : "مقاله‌هایی از ویکی‌پدیای فارسی که بازدیدشان دست‌کم دو برابر دیروز و هفته پیش شده،"} در ${esc(date)}.</p>` +
+    (items.length ? items.slice(0, 50).map((a) => {
+      const title = a.article.replace(/_/g, " ");
+      return `<article class="card">
+      <h3><a href="https://fa.wikipedia.org/wiki/${encodeURIComponent(a.article)}" target="_blank" rel="noopener">${esc(title)}</a></h3>
+      <div class="meta"><span class="badge">${fa(a.views)} بازدید</span>
+        ${a.views >= 2 * a.base ? `<span class="badge watch">${fa(Math.round(a.views / a.base))} برابر</span>` : ""}
+        <a href="https://news.google.com/search?q=${encodeURIComponent(title)}&hl=fa&gl=IR&ceid=IR:fa" target="_blank" rel="noopener">چرا؟ خبرها</a></div>
+    </article>`;
+    }).join("") : `<div class="empty">مقاله‌ای با جهش بازدید نیست.</div>`);
 }
 
 async function showSettings() {
