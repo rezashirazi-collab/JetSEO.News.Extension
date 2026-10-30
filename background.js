@@ -70,11 +70,13 @@ async function poll(first) {
     }
   }
 
+  // a watched word in a story the sites tell, or in one only Telegram channels tell so far
   const newWatch = [];
-  const topics = await newsApi(`topics?hours=3&minSources=1`);
-  if (topics.status === 200) {
-    for (const story of newsPersonal(topics.data.stories, prefs).filter((s) => s.watch)) {
-      if (!watchSeen.has(String(story.id))) newWatch.push(story);
+  for (const path of ["topics?hours=3&minSources=1", "telegram?mode=only&hours=3"]) {
+    const res = await newsApi(path);
+    if (res.status !== 200) continue;
+    for (const story of newsPersonal(res.data.stories, prefs).filter((s) => s.watch)) {
+      if (!watchSeen.has(String(story.id)) && !newWatch.some((w) => w.id === story.id)) newWatch.push(story);
     }
   }
 
