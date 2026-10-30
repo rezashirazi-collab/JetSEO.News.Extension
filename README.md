@@ -19,7 +19,7 @@ The hot stories, the coverage gap, Telegram and the alerts come with the «جت�
 1. Clone this repository, or unzip a release.
 2. Open `chrome://extensions` and switch on «Developer mode».
 3. Click «Load unpacked» and choose the folder.
-4. Click the extension's icon to open the side panel. Click «ورود به جت‌سئو», sign in on jetseo.ir, and come back.
+4. Click the extension's icon to open the side panel (the three buttons in its header switch between a popup, the side panel and a full page; the icon then opens that view). Click «ورود به جت‌سئو», sign in on jetseo.ir, and come back.
 
 Chrome 116 or later.
 
@@ -30,7 +30,7 @@ Chrome 116 or later.
 | `manifest.json` | MV3. The `key` fixes the extension id to `eooiikfbhffioefpapknekohmpningie`; jetseo.ir hands sign-in tokens only to known extension ids. |
 | `api.js` | The account (sign-in hand-off, token), calls to the JetSEO API, personal preferences, and the text folding the server's filters use. |
 | `background.js` | Finishes the sign-in when jetseo.ir's `/extension/connected` page opens. Every 5 minutes: alerts, and the number of unseen gaps on the icon. |
-| `panel.html`, `panel.css`, `panel.js` | The side panel. Every value from the server is escaped (`esc`); links must be `http(s)` (`safeUrl`). |
+| `panel.html`, `panel.css`, `panel.js` | The side panel, also the popup (`?view=popup`) and the full page (`?view=tab`). Every value from the server is escaped (`esc`); links must be `http(s)` (`safeUrl`). |
 | `tools/pack.ps1` | Builds the release zip (forward-slash paths, as the Chrome Web Store requires). |
 
 ## How it talks to JetSEO
