@@ -76,6 +76,7 @@ async function newsPrefs() {
     topicHours: prefs.topicHours ?? 3,
     minSources: prefs.minSources ?? 2,
     gapHours: prefs.gapHours ?? 6,
+    telegramHours: prefs.telegramHours ?? 6,
   };
 }
 
