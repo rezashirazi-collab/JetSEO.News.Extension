@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "جت‌سئو نیوز",
   "short_name": "JetSEO News",
-  "description": "سوژه‌یابی برای تحریریه‌ها: سوژه‌های داغ رسانه‌ها، خبرهایی که رقبا زده‌اند و شما نه، ترندهای گوگل و ویکی‌پدیا و مناسبت‌های روز.",
-  "version": "0.4.0",
+  "description": "سوژه‌یابی برای تحریریه‌ها: سوژه‌های داغ رسانه‌ها، خبرهایی که رقبا زده‌اند و شما نه، تلگرام، ترندهای گوگل و ویکی‌پدیا و مناسبت‌های روز.",
+  "version": "0.5.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2EyOUa/OE5/POE11G/KjvH0vVolyaeaG8pCWXlkVQn8krgCdkOphj1mf7Rhs+t35TO3lJocY3PD4S7lO/rlY5QSnGaUNuxYQ1nu2yt50SIbz4IjxmOkCXfKjGt4fVmq2H/D2/QP2CMRqjgH3P7yk3zDWJ6OKoSGEImQ36jFj0lRIiDoA/1sz99250g14PCnRxWiiUj7czOaq/45umcAVSt5IP5QB5WnO5ad7kbqT4PgBGPlQhjrjRv/sUaEH1yoXWq79KA9Sgy8jKhWDjK/MKzZhtM6gwBygNa3s56evCvKHApSoQxFXapM1zmV9KRYShKwT3o6c+JvbBPv07QqhCwIDAQAB",
   "icons": {
     "16": "icons/icon-16.png",
@@ -21,8 +21,7 @@
   "host_permissions": [
     "https://coreapi.jetseo.ir/*",
     "https://www.jetseo.ir/*",
-    "https://jetseo.ir/*",
-    "https://trends.google.com/*"
+    "https://jetseo.ir/*"
   ],
   "minimum_chrome_version": "116"
 }
