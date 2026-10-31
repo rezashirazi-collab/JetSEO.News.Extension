@@ -44,7 +44,8 @@ async function newsConnect() {
 
 async function newsSignOut() {
   const account = await newsAccount();
-  await chrome.storage.local.remove([NEWS_ACCOUNT_KEY, "newsSeen", "newsState"]);
+  await chrome.storage.local.remove([NEWS_ACCOUNT_KEY, "newsSeen", "newsState", "newsTopicSeen", "newsGapSkip"]);
+  chrome.contextMenus.removeAll(() => chrome.runtime.lastError);
   if (account) {
     // revokes the token on the server; signing out here works even if this fails
     fetch("https://coreapi.jetseo.ir/api/Extension/signout", { method: "POST", credentials: "omit", headers: { "X-JetSEO-User": account.token } }).catch(() => {});
@@ -65,11 +66,31 @@ async function newsApi(path) {
   }
 }
 
-// Personal settings (chrome.storage.sync): excluded words, muted source domains, notifications.
+// How the toolbar icon opens the app: "tab", a full page (the default), or "panel", Chrome's side panel.
+async function newsView() {
+  const { newsView: view } = await chrome.storage.sync.get("newsView").catch(() => ({}));
+  return view === "panel" ? "panel" : "tab";
+}
+
+async function newsSetView(view) {
+  await chrome.storage.sync.set({ newsView: view });
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: view === "panel" }).catch(() => {});
+}
+
+// The full page: brings back the tab already open, or opens one.
+async function newsOpenPage() {
+  const [page] = await chrome.runtime.getContexts({ contextTypes: ["TAB"] }).catch(() => []);
+  if (!page) return chrome.tabs.create({ url: "panel.html?view=tab" });
+  await chrome.tabs.update(page.tabId, { active: true });
+  await chrome.windows.update(page.windowId, { focused: true });
+}
+
+// Personal settings (chrome.storage.sync): excluded and watched words, muted source domains, notifications.
 async function newsPrefs() {
   const { [NEWS_PREFS_KEY]: prefs = {} } = await chrome.storage.sync.get(NEWS_PREFS_KEY).catch(() => ({}));
   return {
     excluded: prefs.excluded ?? [],
+    watch: prefs.watch ?? [],
     muted: prefs.muted ?? [],
     notifyGap: prefs.notifyGap ?? true,
     notifyWatch: prefs.notifyWatch ?? true,
@@ -77,6 +98,7 @@ async function newsPrefs() {
     minSources: prefs.minSources ?? 2,
     gapHours: prefs.gapHours ?? 6,
     telegramHours: prefs.telegramHours ?? 6,
+    mediaHours: prefs.mediaHours ?? 6,
   };
 }
 
@@ -100,11 +122,32 @@ function newsMatches(foldedText, word) {
   return w.length > 0 && ` ${foldedText} `.includes(` ${w} `);
 }
 
+// One of the user's own watched words in a headline.
+function newsWatched(title, prefs) {
+  const folded = newsFold(title);
+  return prefs.watch.some((w) => newsMatches(folded, w));
+}
+
 // The stories the user's own filters leave: none of their words in any headline, none only from muted sources.
+// A story with a personal watched word gets watch, as the team's watched words give it on the server.
 function newsPersonal(stories, prefs) {
   const muted = new Set(prefs.muted.map((d) => d.toLowerCase()));
   return (stories ?? [])
     .map((s) => ({ ...s, items: (s.items ?? []).filter((i) => !muted.has(String(i.domain).toLowerCase())) }))
     .filter((s) => s.items.length > 0)
-    .filter((s) => !s.items.some((i) => prefs.excluded.some((w) => newsMatches(newsFold(i.title), w))));
+    .filter((s) => !s.items.some((i) => prefs.excluded.some((w) => newsMatches(newsFold(i.title), w))))
+    .map((s) => (!s.watch && [s.title, ...s.items.map((i) => i.title)].some((t) => newsWatched(t, prefs)) ? { ...s, watch: true } : s));
+}
+
+// Gap stories the user set aside («رد شد»), as `${siteId}:${storyId}`: neither listed nor alerted again.
+async function newsSkipped() {
+  const { newsGapSkip = [] } = await chrome.storage.local.get("newsGapSkip").catch(() => ({}));
+  return new Set(newsGapSkip);
+}
+
+async function newsSetSkipped(key, skip) {
+  const skipped = await newsSkipped();
+  if (skip) skipped.add(key);
+  else skipped.delete(key);
+  await chrome.storage.local.set({ newsGapSkip: [...skipped].slice(-800) });
 }

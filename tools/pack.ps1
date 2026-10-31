@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $root = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content "$root\manifest.json" -Raw | ConvertFrom-Json).version
 $zip = Join-Path (Split-Path -Parent $root) "JetseoNewsExtension-$version.zip"
-$files = @("manifest.json", "api.js", "background.js", "panel.html", "panel.css", "panel.js") + (Get-ChildItem "$root\icons" -File | ForEach-Object { "icons/" + $_.Name })
+$files = @("manifest.json", "api.js", "background.js", "panel.html", "panel.css", "panel.js") + (Get-ChildItem "$root\icons" -File -Filter *.png |ForEach-Object { "icons/" + $_.Name }) + (Get-ChildItem "$root\fonts" -File | ForEach-Object { "fonts/" + $_.Name })
 if (Test-Path $zip) { Remove-Item $zip }
 $stream = [IO.File]::Open($zip, 'Create')
 $archive = New-Object IO.Compression.ZipArchive($stream, [IO.Compression.ZipArchiveMode]::Create)
