@@ -60,6 +60,6 @@ Chrome 116 or later.
 ## Release
 
 1. Raise `version` in `manifest.json`.
-2. Run `powershell -ExecutionPolicy Bypass -File tools/pack.ps1`. It writes `JetseoNewsExtension-<version>.zip` next to the repository.
-3. **Chrome Web Store:** to keep the same id, the first upload must carry the private key of the manifest's `key`. That key is kept outside this repository, never committed (see `.gitignore`).
-   - If the store assigns a different id, add that id to jetseo.ir's allowed extension origins, or sign-in will be refused.
+2. Run `powershell -ExecutionPolicy Bypass -File tools/pack.ps1`. It writes `JetseoNewsExtension-<version>.zip` next to the repository, its manifest without `key` (the store refuses it).
+3. **Chrome Web Store:** to keep the same id, the first upload of a new item must carry the private key of the manifest's `key`: `tools/pack.ps1 -Key <path to the .pem>` adds it as `key.pem`. That key is kept outside this repository, never committed (see `.gitignore`); later uploads go without it.
+   - If the store assigns a different id, add `chrome-extension://<id>` to jetseo.ir's appSetting `ExtensionAllowedOrigins`, or sign-in will be refused.
