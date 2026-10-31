@@ -102,6 +102,21 @@ tabsNav.addEventListener("click", (e) => {
 });
 document.getElementById("refresh").onclick = () => start();
 
+// The same page is the popup (?view=popup), the side panel (no view) and the full page (?view=tab).
+const VIEW = new URLSearchParams(location.search).get("view") ?? "panel";
+document.body.dataset.view = VIEW;
+document.querySelector(`#views [data-view="${VIEW}"]`).setAttribute("aria-pressed", "true");
+let windowId = null;
+chrome.windows.getCurrent().then((w) => (windowId = w.id));
+document.getElementById("views").addEventListener("click", async (e) => {
+  const view = e.target.closest("button[data-view]")?.dataset.view;
+  if (!view || view === VIEW) return;
+  // sidePanel.open must run inside the click, before any await
+  if (view === "panel") chrome.sidePanel.open({ windowId }).catch(() => {});
+  await chrome.runtime.sendMessage({ type: "news-view", view, windowId });
+  window.close();
+});
+
 // s.trend: the Google trend or rising Wikipedia article in its headlines; s.channels: Telegram channels that told it
 // (s.sources counts sites); s.telegramLead: minutes the first channel was ahead of the first site. All from the server.
 function storyCard(s, now, extra = "") {

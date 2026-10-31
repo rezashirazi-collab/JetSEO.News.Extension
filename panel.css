@@ -15,6 +15,15 @@ button, select, input { font: inherit; color: inherit }
 .top { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2 }
 .top #who { margin-inline-start: auto }
 .icon { border: 1px solid var(--line); background: var(--card); border-radius: 8px; width: 30px; height: 30px; cursor: pointer }
+.views { display: flex; gap: 2px }
+.views .icon { width: 26px; height: 26px; padding: 0; font-size: 13px; line-height: 1 }
+.views .icon[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand); border-color: var(--brand) }
+/* the toolbar popup has no size of its own (Chrome caps it at 800×600) */
+body[data-view="popup"] { width: 440px; min-height: 560px }
+/* the full page keeps the panel's column instead of stretching lines across the screen */
+body[data-view="tab"] .top, body[data-view="tab"] .tabs { padding-inline: max(12px, calc(50% - 440px)) }
+body[data-view="tab"] main, body[data-view="tab"] #banner { max-width: 880px; margin-inline: auto }
+body[data-view="tab"] main { padding: 16px 10px }
 .tabs { display: flex; gap: 4px; padding: 8px 10px; overflow-x: auto; background: var(--card); border-bottom: 1px solid var(--line) }
 .tabs button { border: 0; background: transparent; padding: 4px 8px; border-radius: 14px; cursor: pointer; white-space: nowrap; font-size: 12.5px }
 .tabs button.on { background: var(--brand-soft); color: var(--brand); font-weight: 700 }

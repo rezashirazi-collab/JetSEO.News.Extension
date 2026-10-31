@@ -8,12 +8,40 @@ const POLL_MINUTES = 5;
 const SEEN_MAX = 800;
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  applyView();
   chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
 });
 chrome.runtime.onStartup.addListener(() => {
+  applyView();
   chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
 });
+
+// What the icon opens («newsView»): "popup" the toolbar window, "panel" the side panel, "tab" a full page.
+async function applyView() {
+  const { newsView = "panel" } = await chrome.storage.local.get("newsView");
+  await chrome.action.setPopup({ popup: newsView === "popup" ? "panel.html?view=popup" : "" });
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: newsView === "panel" }).catch(() => {});
+}
+
+// Fires only with neither a popup nor the panel behind the icon: the full page, one tab at most.
+chrome.action.onClicked.addListener(() => openTab());
+async function openTab() {
+  const [open] = await chrome.runtime.getContexts({ contextTypes: ["TAB"] });
+  if (!open) return chrome.tabs.create({ url: "panel.html?view=tab" });
+  await chrome.tabs.update(open.tabId, { active: true });
+  await chrome.windows.update(open.windowId, { focused: true });
+}
+
+// The switcher in the panel's header. The side panel itself is opened by the page (it needs the click).
+async function setView(view, windowId, fromTab) {
+  await chrome.storage.local.set({ newsView: view });
+  await applyView();
+  if (view === "tab") await openTab();
+  if (fromTab) await chrome.tabs.remove(fromTab);
+  // ponytail: waits for the old view to close (a closing panel or tab dismisses a new popup); Chrome < 127 has no
+  // openPopup, so there the next click on the icon opens it.
+  if (view === "popup") setTimeout(() => chrome.action.openPopup({ windowId }).catch(() => {}), 300);
+}
 
 // The sign-in page returns to /extension/connected: ask for the token right away and tell an open panel.
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
@@ -29,9 +57,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "news-poll") poll(false);
 });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "news-gap-seen") markGapSeen(message.ids ?? []);
   if (message?.type === "news-poll") poll(false);
+  if (message?.type === "news-view") {
+    setView(message.view, message.windowId, sender.tab?.id).finally(() => sendResponse(true));
+    return true;
+  }
 });
 
 chrome.notifications.onClicked.addListener(async (id) => {
