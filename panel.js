@@ -30,6 +30,17 @@ function ago(at, now) {
   return hours < 24 ? `${fa(hours)} ساعت پیش` : `${fa(Math.floor(hours / 24))} روز پیش`;
 }
 
+// The server's news loop stores headlines every few minutes; none for 90 minutes means it stopped. 2026-11-01: a server
+// build without the loop left every story tab empty for days, and «no stories» looked like a quiet news day. Empty when
+// the data is fresh, or when CoreApi is older than the updatedAt field.
+function staleNote(data) {
+  if (!data || !("updatedAt" in data)) return "";
+  const minutes = data.updatedAt ? (Date.parse(data.now) - Date.parse(data.updatedAt)) / 60000 : Infinity;
+  if (minutes < 90) return "";
+  return `<div class="stale">${data.updatedAt ? `آخرین خبر ${ago(data.updatedAt, data.now)} روی سرور ثبت شد` : "هنوز خبری روی سرور ثبت نشده است"}؛
+    خواندن خبرها در سرور جت‌سئو متوقف شده و خالی بودن فهرست به معنی نبودن سوژه نیست. لطفاً به پشتیبانی خبر دهید.</div>`;
+}
+
 function setBanner(html, bad = false) {
   banner.hidden = !html;
   banner.className = bad ? "bad" : "";
@@ -238,7 +249,7 @@ async function showDash(id) {
     <div class="legend"><span><i class="s-ok"></i>اول شما ${fa(first)}</span><span><i class="s-late"></i>بعد از رقبا ${fa(late.length)}</span><span><i class="s-none"></i>رقیبی نزده ${fa(none)}</span></div>
     ${late.length ? `<p class="muted" style="margin:4px 0 0">تأخیر میانه: ${duration(median)}</p>` : ""}` : "";
 
-  main.innerHTML = `<div class="tiles">${tiles}</div><div class="dash-grid">` +
+  main.innerHTML = staleNote(topics) + `<div class="tiles">${tiles}</div><div class="dash-grid">` +
     section(`سوژه‌های داغ رسانه‌ها`, "topics", hot && bars(hot.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources, text: `${fa(s.sources)} منبع` })))) +
     section(`شکاف پوشش ${gapS ? `<span class="muted" dir="ltr">${esc(gapS.domain)}</span>` : ""}`, "gap", gaps?.length && `<ul class="list">${gaps.slice(0, 3).map((s) =>
       `<li><a href="${safeUrl(s.items?.[0]?.url)}" target="_blank" rel="noopener">${esc(s.title)}</a> <span class="muted">رقبا: ${esc((s.competitors ?? []).join("، "))}</span></li>`).join("")}</ul>`) +
@@ -290,14 +301,14 @@ async function showTopics(id) {
     </div><div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
   document.getElementById("hours").onchange = async (e) => { await saveNewsPrefs({ topicHours: +e.target.value }); show("topics"); };
   document.getElementById("min").onchange = async (e) => { await saveNewsPrefs({ minSources: +e.target.value }); show("topics"); };
-  let stories = null, now = null;
+  let stories = null, now = null, note = "";
   const list = document.getElementById("list");
   // any part of any headline, folded as the filters (ی/ي, digits, half-spaces)
   const render = () => {
     const q = newsFold(topicQuery);
     const shown = q ? stories.filter((s) => [s.title, ...s.items.map((i) => i.title)].some((t) => newsFold(t).includes(q))) : stories;
-    list.innerHTML = shown.length ? shown.map((s) => storyCard(s, now)).join("")
-      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : "در این بازه سوژه‌ای با این تعداد منبع نیست."}</div>`;
+    list.innerHTML = note + (shown.length ? shown.map((s) => storyCard(s, now)).join("")
+      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : "در این بازه سوژه‌ای با این تعداد منبع نیست."}</div>`);
   };
   document.getElementById("q").oninput = (e) => { topicQuery = e.target.value; if (stories) render(); };
   const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`);
@@ -306,6 +317,7 @@ async function showTopics(id) {
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
   stories = await markFresh(newsPersonal(res.data.stories, prefs));
   now = res.data.now;
+  note = staleNote(res.data);
   if (id === loadId) render();
 }
 
@@ -336,7 +348,7 @@ async function showGap(id) {
   if (id !== loadId) return;
   const key = (s) => `${site.id}:${s.id}`;
   const stories = newsPersonal(res.data.stories, prefs).filter((s) => !skipped.has(key(s)));
-  list.innerHTML = `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minCompetitors)} رقیب از ${fa(res.data.competitors)} رقیب شما کار کرده‌اند و ${esc(res.data.site)} نه.</p>` +
+  list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minCompetitors)} رقیب از ${fa(res.data.competitors)} رقیب شما کار کرده‌اند و ${esc(res.data.site)} نه.</p>` +
     (stories.length ? stories.map((s) => storyCard(s, res.data.now, `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>
       <button class="btn ghost small" type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ دیگر نه نشان داده شود نه هشدار">رد شد</button>`)).join("")
       : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
@@ -399,7 +411,7 @@ async function showMine(id) {
     ? `در ${fa(covered.length)} خبر که رقبا هم کار کردند، ${fa(covered.length - late.length)} بار اول شما بودید` +
       (late.length ? `؛ بقیه به‌طور میانه ${duration(late.map((i) => i.lagMinutes).sort((a, b) => a - b)[Math.floor(late.length / 2)])} دیرتر.` : ".")
     : "";
-  list.innerHTML = `<p class="muted">خبرهای ۲۴ ساعت اخیر ${esc(res.data.site)}. ${summary}</p>` + (items.length ? items.map((i, n) => `<article class="card">
+  list.innerHTML = staleNote(res.data) + `<p class="muted">خبرهای ۲۴ ساعت اخیر ${esc(res.data.site)}. ${summary}</p>` + (items.length ? items.map((i, n) => `<article class="card">
       <h3><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a></h3>
       <div class="meta">${lagBadge(i)} <span>${ago(i.at, res.data.now)}</span>
         ${i.lagMinutes != null ? `<button class="btn ghost small" type="button" data-compare="${n}">مقایسه تیتر</button>` : ""}
@@ -608,7 +620,7 @@ async function showTelegram(id) {
   if (mode === "trend") {
     const posts = (res.data.posts ?? []).filter((p) => !prefs.muted.includes(String(p.domain ?? "").toLowerCase()))
       .map((p) => (!p.watch && newsWatched(p.title, prefs) ? { ...p, watch: true } : p));
-    list.innerHTML = `<p class="muted">پست‌هایی که بازدیدشان از معمولِ همان کانال تندتر بالا می‌رود.</p>` + (posts.length ? posts.map((p) => `<article class="card">
+    list.innerHTML = staleNote(res.data) + `<p class="muted">پست‌هایی که بازدیدشان از معمولِ همان کانال تندتر بالا می‌رود.</p>` + (posts.length ? posts.map((p) => `<article class="card">
       <h3><a href="${safeUrl(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
       <div class="meta"><span class="badge late">${fa(p.relative)} برابر معمول کانال</span><span class="badge">${fa(p.perHour)} بازدید در ساعت</span>
         ${p.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : ""}
@@ -617,7 +629,7 @@ async function showTelegram(id) {
     return;
   }
   const stories = newsPersonal(res.data.stories, prefs);
-  list.innerHTML = `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minChannels)} کانال تلگرام گفته‌اند و هنوز هیچ سایتی نه.</p>` +
+  list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minChannels)} کانال تلگرام گفته‌اند و هنوز هیچ سایتی نه.</p>` +
     (stories.length ? stories.map((s) => storyCard(s, res.data.now)).join("") : `<div class="empty">در این بازه سوژه‌ای فقط در تلگرام نیست.</div>`);
 }
 
