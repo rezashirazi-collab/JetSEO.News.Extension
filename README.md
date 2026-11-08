@@ -15,6 +15,7 @@ While Chrome is open, the extension checks every 5 minutes and notifies new cove
 
 Also:
 - Hot stories not on the list the last time it was in sight are marked «جدید»; a search box filters the headlines.
+- Every story has a topic badge (سیاسی، ورزشی، …, decided on the server from the feeds' sections and the headline). Chips over the hot stories, or «موضوع‌های من» in «تنظیمات», keep only your own desk's topics, out of the team's «حوزه خبری» set in the panel; a story with a watched keyword stays whatever its topic.
 - «زاویه‌ها» on a story asks Google's autocomplete what readers search with it, and adds that to its «کپی».
 - «رد شد» on a coverage gap hides that story from the list and the alerts.
 - Right-click a page of one of the team's sites, or a link to one: «بررسی سئوی این خبر» opens «مطالب ما» with its news SEO check.

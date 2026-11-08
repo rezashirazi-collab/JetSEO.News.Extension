@@ -20,6 +20,32 @@ const fa = (n) => Number(n).toLocaleString("fa-IR");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const safeUrl = (u) => (/^https?:\/\//i.test(String(u ?? "")) ? esc(u) : "#");
 
+// Story topics from the state (CoreApi NewsTopics): offered = the team's «حوزه خبری» when the owner chose one, else all.
+const topicName = (key) => state?.topics?.find((t) => t.key === key)?.name ?? null;
+const offeredTopics = () => (state?.topics ?? []).filter((t) => !state.teamTopics?.length || state.teamTopics.includes(t.key));
+
+// Chips of the user's own topics over a story list: «همه» or any of the offered; a click saves and calls redraw.
+function topicBar(prefs, redraw) {
+  const offered = offeredTopics();
+  if (offered.length < 2) return null;
+  const bar = document.createElement("div");
+  bar.className = "chips topics";
+  bar.setAttribute("role", "group");
+  bar.setAttribute("aria-label", "موضوع‌های من");
+  const chip = (key, name) => `<button type="button" class="chip${(key ? prefs.topics.includes(key) : !prefs.topics.length) ? " on" : ""}"
+    data-topic="${esc(key)}" aria-pressed="${key ? prefs.topics.includes(key) : !prefs.topics.length}">${esc(name)}</button>`;
+  bar.innerHTML = chip("", "همه موضوع‌ها") + offered.map((t) => chip(t.key, t.name)).join("")
+    + (state.teamTopics?.length ? `<span class="muted">حوزه تیم</span>` : "");
+  bar.onclick = async (e) => {
+    const key = e.target.closest("[data-topic]")?.dataset.topic;
+    if (key === undefined) return;
+    const topics = key ? (prefs.topics.includes(key) ? prefs.topics.filter((k) => k !== key) : [...prefs.topics, key]) : [];
+    await saveNewsPrefs({ topics });
+    redraw();
+  };
+  return bar;
+}
+
 // «۱۲ دقیقه پیش» from the server's own clock (both times are the server's local time, without a zone)
 function ago(at, now) {
   const minutes = Math.max(0, Math.round((Date.parse(now) - Date.parse(at)) / 60000));
@@ -82,6 +108,10 @@ async function start() {
     setBanner(null);
   }
   gapSite = gapSite ?? state.sites?.[0]?.id ?? null;
+  // own topics the team no longer shows would hide everything: drop them (the background reads the same prefs)
+  const prefs = await newsPrefs();
+  const keep = prefs.topics.filter((k) => offeredTopics().some((t) => t.key === k));
+  if (state.topics && keep.length !== prefs.topics.length) await saveNewsPrefs({ topics: keep });
   if (!(await takeGo())) show(tab);
 }
 
@@ -174,6 +204,7 @@ function storyCard(s, now, extra = "", body = "") {
       ${s.fresh ? `<span class="badge new">جدید</span>` : ""}
       ${s.sources ? `<span class="badge">${fa(s.sources)} منبع</span>` : ""}
       ${s.channels ? `<span class="badge">${fa(s.channels)} کانال</span>` : ""}
+      ${topicName(s.topic) ? `<span class="badge topic">${esc(topicName(s.topic))}</span>` : ""}
       ${s.telegramLead > 0 ? `<span class="badge tg">اول در تلگرام · ${duration(s.telegramLead)} زودتر</span>` : ""}
       ${s.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : ""}
       ${s.trend ? `<span class="badge trend">ترند ${esc(s.trend.source)}: ${esc(s.trend.text)}</span>` : ""}
@@ -299,6 +330,8 @@ async function showTopics(id) {
       <label>حداقل منبع <select id="min">${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
       <input id="q" type="search" placeholder="جستجو در تیترها" aria-label="جستجو در تیترها" value="${esc(topicQuery)}" style="flex:1;min-width:120px" />
     </div><div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
+  const bar = topicBar(prefs, () => show("topics"));
+  if (bar) main.querySelector(".controls").after(bar);
   document.getElementById("hours").onchange = async (e) => { await saveNewsPrefs({ topicHours: +e.target.value }); show("topics"); };
   document.getElementById("min").onchange = async (e) => { await saveNewsPrefs({ minSources: +e.target.value }); show("topics"); };
   let stories = null, now = null, note = "";
@@ -308,7 +341,7 @@ async function showTopics(id) {
     const q = newsFold(topicQuery);
     const shown = q ? stories.filter((s) => [s.title, ...s.items.map((i) => i.title)].some((t) => newsFold(t).includes(q))) : stories;
     list.innerHTML = note + (shown.length ? shown.map((s) => storyCard(s, now)).join("")
-      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : "در این بازه سوژه‌ای با این تعداد منبع نیست."}</div>`);
+      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : `در این بازه سوژه‌ای با این تعداد منبع${prefs.topics.length ? " در موضوع‌های انتخاب‌شده" : ""} نیست.`}</div>`);
   };
   document.getElementById("q").oninput = (e) => { topicQuery = e.target.value; if (stories) render(); };
   const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`);
@@ -782,6 +815,9 @@ async function showSettings() {
       <textarea id="watch">${esc(prefs.watch.join("، "))}</textarea>
       <label for="muted">منابع بی‌صدا (دامنه، با ویرگول)</label>
       <textarea id="muted" dir="ltr">${esc(prefs.muted.join(", "))}</textarea>
+      ${offeredTopics().length > 1 ? `<fieldset class="topics-pick"><legend>موضوع‌های من (میز شما در تحریریه؛ هیچ = همه${state.teamTopics?.length ? " موضوع‌های تیم" : ""})</legend>
+        ${offeredTopics().map((t) => `<label class="row"><input type="checkbox" name="topic" value="${esc(t.key)}" ${prefs.topics.includes(t.key) ? "checked" : ""}/> ${esc(t.name)}</label>`).join("")}
+        <p class="muted" style="margin:0">سوژه‌ای با کلیدواژه تحت نظر، از هر موضوعی باشد، نمایش داده می‌شود و هشدار می‌دهد.</p></fieldset>` : ""}
     </section>
     <section class="card">
       <h3>هشدارها</h3>
@@ -807,6 +843,7 @@ async function showSettings() {
       excluded: list("excluded"),
       watch: list("watch"),
       muted: list("muted").map((d) => d.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")),
+      ...(offeredTopics().length > 1 ? { topics: [...document.querySelectorAll("input[name=topic]:checked")].map((c) => c.value) } : {}),
       notifyGap: document.getElementById("notifyGap").checked,
       notifyWatch: document.getElementById("notifyWatch").checked,
     });

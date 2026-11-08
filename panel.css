@@ -61,6 +61,13 @@ details li { margin: 2px 0 }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px }
 .chip { padding: 0 8px; border-radius: 10px; border: 1px solid var(--line); font-size: 12px; text-decoration: none }
 .chip:hover { background: var(--brand-soft) }
+/* own topics over the hot stories (topicBar) and in settings */
+.chips.topics { align-items: center; margin: 0 0 8px }
+button.chip { background: var(--card); color: inherit; font: inherit; font-size: 12px; padding: 1px 10px; cursor: pointer }
+.chip.on { background: var(--brand-soft); color: var(--brand); border-color: var(--brand); font-weight: 700 }
+.badge.topic { background: #ecfdf5; color: #065f46 }
+fieldset.topics-pick { border: 0; padding: 0; margin: 10px 0 0 }
+fieldset.topics-pick legend { padding: 0; font-size: 13px }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; margin-bottom: 8px }
 .tile { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 8px 10px; cursor: pointer; text-align: start }
 .tile:hover { border-color: var(--brand) }

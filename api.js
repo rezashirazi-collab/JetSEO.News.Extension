@@ -85,13 +85,14 @@ async function newsOpenPage() {
   await chrome.windows.update(page.windowId, { focused: true });
 }
 
-// Personal settings (chrome.storage.sync): excluded and watched words, muted source domains, notifications.
+// Personal settings (chrome.storage.sync): excluded and watched words, muted source domains, own topics, notifications.
 async function newsPrefs() {
   const { [NEWS_PREFS_KEY]: prefs = {} } = await chrome.storage.sync.get(NEWS_PREFS_KEY).catch(() => ({}));
   return {
     excluded: prefs.excluded ?? [],
     watch: prefs.watch ?? [],
     muted: prefs.muted ?? [],
+    topics: prefs.topics ?? [],
     notifyGap: prefs.notifyGap ?? true,
     notifyWatch: prefs.notifyWatch ?? true,
     topicHours: prefs.topicHours ?? 3,
@@ -128,15 +129,18 @@ function newsWatched(title, prefs) {
   return prefs.watch.some((w) => newsMatches(folded, w));
 }
 
-// The stories the user's own filters leave: none of their words in any headline, none only from muted sources.
-// A story with a personal watched word gets watch, as the team's watched words give it on the server.
+// The stories the user's own filters leave: none of their words in any headline, none only from muted sources, and of
+// their own topics (prefs.topics, a desk of the newsroom; none = all the team shows). A story with a personal watched
+// word gets watch, as the team's watched words give it on the server, and a watched story stays whatever its topic
+// (the server's rule too). s.topic: CoreApi NewsTopics key or null; a server without topics sends no key: kept.
 function newsPersonal(stories, prefs) {
   const muted = new Set(prefs.muted.map((d) => d.toLowerCase()));
   return (stories ?? [])
     .map((s) => ({ ...s, items: (s.items ?? []).filter((i) => !muted.has(String(i.domain).toLowerCase())) }))
     .filter((s) => s.items.length > 0)
     .filter((s) => !s.items.some((i) => prefs.excluded.some((w) => newsMatches(newsFold(i.title), w))))
-    .map((s) => (!s.watch && [s.title, ...s.items.map((i) => i.title)].some((t) => newsWatched(t, prefs)) ? { ...s, watch: true } : s));
+    .map((s) => (!s.watch && [s.title, ...s.items.map((i) => i.title)].some((t) => newsWatched(t, prefs)) ? { ...s, watch: true } : s))
+    .filter((s) => !prefs.topics.length || !("topic" in s) || s.watch || prefs.topics.includes(s.topic));
 }
 
 // Gap stories the user set aside («رد شد»), as `${siteId}:${storyId}`: neither listed nor alerted again.
