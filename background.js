@@ -1,47 +1,24 @@
 // «جت‌سئو نیوز» background: the sign-in hand-off from jetseo.ir, and every 5 minutes the alerts (JetSEO design doc
 // 6-2): coverage gaps of the user's sites and stories with a watched word, each told once.
 // The icon's number is the gaps not looked at yet; the side panel clears it when its «شکاف پوشش» tab opens.
+// Also the right-click «بررسی سئو» on the team's sites, and a notification's click, which open the app on their tab.
 
 importScripts("api.js");
 
 const POLL_MINUTES = 5;
 const SEEN_MAX = 800;
 
+// on every start of the worker, so a view chosen on another device (storage.sync) applies here too
+newsView().then((view) => chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: view === "panel" })).catch(() => {});
+// with the full-page view the side panel does not take the click and it comes here
+chrome.action.onClicked.addListener(() => newsOpenPage());
+
 chrome.runtime.onInstalled.addListener(() => {
-  applyView();
   chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
 });
 chrome.runtime.onStartup.addListener(() => {
-  applyView();
   chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
 });
-
-// What the icon opens («newsView»): "popup" the toolbar window, "panel" the side panel, "tab" a full page.
-async function applyView() {
-  const { newsView = "panel" } = await chrome.storage.local.get("newsView");
-  await chrome.action.setPopup({ popup: newsView === "popup" ? "panel.html?view=popup" : "" });
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: newsView === "panel" }).catch(() => {});
-}
-
-// Fires only with neither a popup nor the panel behind the icon: the full page, one tab at most.
-chrome.action.onClicked.addListener(() => openTab());
-async function openTab() {
-  const [open] = await chrome.runtime.getContexts({ contextTypes: ["TAB"] });
-  if (!open) return chrome.tabs.create({ url: "panel.html?view=tab" });
-  await chrome.tabs.update(open.tabId, { active: true });
-  await chrome.windows.update(open.windowId, { focused: true });
-}
-
-// The switcher in the panel's header. The side panel itself is opened by the page (it needs the click).
-async function setView(view, windowId, fromTab) {
-  await chrome.storage.local.set({ newsView: view });
-  await applyView();
-  if (view === "tab") await openTab();
-  if (fromTab) await chrome.tabs.remove(fromTab);
-  // ponytail: waits for the old view to close (a closing panel or tab dismisses a new popup); Chrome < 127 has no
-  // openPopup, so there the next click on the icon opens it.
-  if (view === "popup") setTimeout(() => chrome.action.openPopup({ windowId }).catch(() => {}), 300);
-}
 
 // The sign-in page returns to /extension/connected: ask for the token right away and tell an open panel.
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
@@ -57,31 +34,68 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "news-poll") poll(false);
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "news-gap-seen") markGapSeen(message.ids ?? []);
   if (message?.type === "news-poll") poll(false);
-  if (message?.type === "news-view") {
-    setView(message.view, message.windowId, sender.tab?.id).finally(() => sendResponse(true));
-    return true;
-  }
 });
 
 chrome.notifications.onClicked.addListener(async (id) => {
-  const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
-  const url = newsNotified[id];
-  if (url && /^https?:\/\//i.test(url)) chrome.tabs.create({ url });
   chrome.notifications.clear(id);
+  const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
+  const go = newsNotified[id];
+  if (!go?.tab) return;
+  const [view, win] = await Promise.all([newsView(), chrome.windows.getLastFocused().catch(() => null)]);
+  // after these awaits sidePanel.open may refuse (no user gesture left): then the full page opens
+  openAt(go, view === "panel", win?.id);
 });
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const url = String(info.menuItemId).startsWith("link") ? info.linkUrl : info.pageUrl;
+  openAt({ tab: "mine", url }, String(info.menuItemId).endsWith("|panel"), tab?.windowId);
+});
+
+// The view's change rebuilds the menus, whose ids carry it.
+chrome.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== "sync" || !changes.newsView) return;
+  const { newsState } = await chrome.storage.local.get("newsState");
+  menus(newsState?.access ? newsState.sites : []);
+});
+
+// Opens the app on go's tab ({ tab, siteId, url }, url = a page to check): the side panel when panel and windowId,
+// else the full page. sidePanel.open needs the click's user gesture, so it is called before anything is awaited.
+function openAt(go, panel, windowId) {
+  chrome.storage.session.set({ newsGo: go }).then(() => chrome.runtime.sendMessage({ type: "news-go" })).catch(() => {});
+  if (panel && windowId != null) chrome.sidePanel.open({ windowId }).catch(() => newsOpenPage());
+  else newsOpenPage();
+}
+
+// «بررسی سئو» on the pages of the team's sites and on links to them (api/News/check takes only those). The ids carry
+// the icon's view («page|panel»): a click must open the side panel at once, with no time to read the setting.
+async function menus(sites) {
+  await new Promise((done) => chrome.contextMenus.removeAll(done));
+  const patterns = (sites ?? []).map((s) => String(s.domain).toLowerCase().replace(/^www\./, ""))
+    .filter((d) => /^[a-z0-9.-]+$/.test(d)).map((d) => `*://*.${d}/*`);
+  if (!patterns.length) return;
+  const view = await newsView();
+  // a second round running at the same time creates the same ids: its error is only noise
+  const quiet = () => chrome.runtime.lastError;
+  chrome.contextMenus.create({ id: `page|${view}`, title: "بررسی سئوی این خبر (جت‌سئو نیوز)", contexts: ["page"], documentUrlPatterns: patterns }, quiet);
+  chrome.contextMenus.create({ id: `link|${view}`, title: "بررسی سئوی این لینک (جت‌سئو نیوز)", contexts: ["link"], targetUrlPatterns: patterns }, quiet);
+}
 
 // first: right after sign-in, when everything already there counts as seen (no flood of old stories).
 async function poll(first) {
   const state = await newsApi("state");
   if (state.status !== 200 || !state.data?.access) {
     await chrome.action.setBadgeText({ text: "" });
+    // signed out or no module; on a network error the menus stay
+    if (state.status === 200 || state.status === 401) await menus([]);
     return;
   }
   await chrome.storage.local.set({ newsState: state.data });
+  await menus(state.data.sites);
   const prefs = await newsPrefs();
+  const skipped = await newsSkipped();
   const { newsSeen = { gap: [], watch: [], started: false } } = await chrome.storage.local.get("newsSeen");
   const quiet = first || !newsSeen.started;
   const gapSeen = new Set(newsSeen.gap);
@@ -95,9 +109,10 @@ async function poll(first) {
     if (gap.status !== 200) continue;
     for (const story of newsPersonal(gap.data.stories, prefs)) {
       const key = `${site.id}:${story.id}`;
+      if (skipped.has(key)) continue;
       if (!gapSeen.has(key)) {
         unseenGaps++;
-        if (!newsSeen.notified?.includes(key)) newGaps.push({ key, site: site.domain, story });
+        if (!newsSeen.notified?.includes(key)) newGaps.push({ key, site: site.domain, siteId: site.id, story });
       }
     }
   }
@@ -108,7 +123,7 @@ async function poll(first) {
     const res = await newsApi(path);
     if (res.status !== 200) continue;
     for (const story of newsPersonal(res.data.stories, prefs).filter((s) => s.watch)) {
-      if (!watchSeen.has(String(story.id)) && !newWatch.some((w) => w.id === story.id)) newWatch.push(story);
+      if (!watchSeen.has(String(story.id)) && !newWatch.some((w) => w.id === story.id)) newWatch.push({ ...story, tab: path.startsWith("telegram") ? "telegram" : "topics" });
     }
   }
 
@@ -119,12 +134,12 @@ async function poll(first) {
       await notify(
         newGaps.length === 1 ? `رقبا زدند، شما نه (${top.site})` : `${newGaps.length} سوژه که رقبا زده‌اند و شما نه`,
         newGaps.slice(0, 3).map((g) => g.story.title).join("\n"),
-        top.story.items?.[0]?.url
+        { tab: "gap", siteId: top.siteId }
       );
     }
     if (prefs.notifyWatch && newWatch.length) {
       await notify(newWatch.length === 1 ? "کلیدواژه تحت نظر" : `${newWatch.length} سوژه با کلیدواژه تحت نظر`,
-        newWatch.slice(0, 3).map((s) => s.title).join("\n"), newWatch[0].items?.[0]?.url);
+        newWatch.slice(0, 3).map((s) => s.title).join("\n"), { tab: newWatch[0].tab });
     }
   }
   newGaps.forEach((g) => notified.add(g.key));
@@ -151,10 +166,11 @@ async function markGapSeen(keys) {
   await chrome.action.setBadgeText({ text: "" });
 }
 
-async function notify(title, message, url) {
+// go: where its click opens the app ({ tab, siteId })
+async function notify(title, message, go) {
   const id = `news-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
   const keep = Object.entries(newsNotified).slice(-30);
-  await chrome.storage.session.set({ newsNotified: Object.fromEntries([...keep, [id, url ?? ""]]) }).catch(() => {});
+  await chrome.storage.session.set({ newsNotified: Object.fromEntries([...keep, [id, go]]) }).catch(() => {});
   chrome.notifications.create(id, { type: "basic", iconUrl: "icons/icon-128.png", title, message: message.slice(0, 300), priority: 1 });
 }
