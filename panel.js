@@ -255,6 +255,63 @@ document.getElementById("view").onclick = async (e) => {
 // last risingMinutes (the server's News.RisingMinutes, kept from the last list). A server without them sends none: the
 // card then shows neither the badges nor the «برداشتم» button.
 let risingMinutes = 60;
+// ---------------------------------------------------------------- shared by every list
+
+// «برداشتم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
+// member now sees it.
+main.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-mark]");
+  if (!b) return;
+  b.disabled = true;
+  const res = await newsApi(`mark?storyId=${encodeURIComponent(b.dataset.story)}&status=${encodeURIComponent(b.dataset.mark)}`, "POST");
+  if (res.status === 200) return show(tab);
+  b.disabled = false;
+  b.textContent = "ذخیره نشد";
+});
+
+// for JetSEO's use report (newsUsed): the category on screen, and when the open was last counted (one a half hour:
+// every filter change and mark draws the list again)
+let globalCategory = "";
+const counted = {};
+function countOnce(what, category = "") {
+  const key = `${what}|${category}`;
+  if (Date.now() - (counted[key] ?? 0) < 30 * 60 * 1000) return;
+  counted[key] = Date.now();
+  newsUsed(what, category);
+}
+
+const PERSIAN_TABS = ["topics", "gap", "mine", "telegram", "media"];
+
+// a foreign article opened or sent to Google Translate from a «رسانه‌های خارجی» card (the Persian headlines found are
+// not counted), or a headline opened from a card of the Persian module tabs
+main.addEventListener("click", (e) => {
+  const a = e.target.closest(".card a[href]");
+  if (!a || !/^https?:/.test(a.href)) return;
+  if (a.closest(".global")) {
+    if (!a.closest("ul[lang=fa]")) newsUsed(a.href.startsWith("https://translate.google.com/") ? "translate" : "read", globalCategory);
+  } else if (PERSIAN_TABS.includes(tab)) {
+    newsUsed("persian-read");
+  }
+});
+
+// The controls of a list: `primary` always in sight (the period and the order), the rest behind «فیلتر», whose number
+// says how many of them are on. The panel stays open across the list's redraws (a change of a filter draws it again).
+const filtersOpen = {};
+function controlsHtml(primary, filters = "", active = 0) {
+  const open = !!filtersOpen[tab];
+  return `<div class="controls">${primary}${filters ? `<button id="ftoggle" class="btn ghost small" type="button" aria-expanded="${open}" aria-controls="fpanel">فیلتر${active ? ` <span class="count">${fa(active)}</span>` : ""}</button>` : ""}</div>
+    ${filters ? `<div id="fpanel" class="controls filters"${open ? "" : " hidden"}>${filters}</div>` : ""}`;
+}
+function wireControls() {
+  const toggle = document.getElementById("ftoggle");
+  if (!toggle) return;
+  toggle.onclick = () => {
+    filtersOpen[tab] = !filtersOpen[tab];
+    document.getElementById("fpanel").hidden = !filtersOpen[tab];
+    toggle.setAttribute("aria-expanded", String(filtersOpen[tab]));
+  };
+}
+
 // One layout for every story card (Persian and foreign), so a list reads at a glance:
 //   the headline, a link to the first source's article (ltr: an English headline);
 //   the count badge, then at most two of `badges` (most important first; the rest go under «جزئیات»);
@@ -589,18 +646,6 @@ function globalCard(s, now, risingHours) {
   });
 }
 
-// «برداشتم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
-// member now sees it.
-main.addEventListener("click", async (e) => {
-  const b = e.target.closest("button[data-mark]");
-  if (!b) return;
-  b.disabled = true;
-  const res = await newsApi(`mark?storyId=${encodeURIComponent(b.dataset.story)}&status=${encodeURIComponent(b.dataset.mark)}`, "POST");
-  if (res.status === 200) return show(tab);
-  b.disabled = false;
-  b.textContent = "ذخیره نشد";
-});
-
 // «زاویه‌ها» of a foreign story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
 // fewer of them until Google knows the phrase. On the click only, like the Persian stories' «زاویه‌ها».
 main.addEventListener("click", async (e) => {
@@ -637,48 +682,6 @@ const GLOBAL_SORTS = {
 };
 // until the panel closes: a look at what the team set aside, not a setting
 let globalShowDismissed = false;
-// for JetSEO's use report (newsUsed): the category on screen, and when the open was last counted (one a half hour:
-// every filter change and mark draws the list again)
-let globalCategory = "";
-const counted = {};
-function countOnce(what, category = "") {
-  const key = `${what}|${category}`;
-  if (Date.now() - (counted[key] ?? 0) < 30 * 60 * 1000) return;
-  counted[key] = Date.now();
-  newsUsed(what, category);
-}
-
-const PERSIAN_TABS = ["topics", "gap", "mine", "telegram", "media"];
-
-// a foreign article opened or sent to Google Translate from a «رسانه‌های خارجی» card (the Persian headlines found are
-// not counted), or a headline opened from a card of the Persian module tabs
-main.addEventListener("click", (e) => {
-  const a = e.target.closest(".card a[href]");
-  if (!a || !/^https?:/.test(a.href)) return;
-  if (a.closest(".global")) {
-    if (!a.closest("ul[lang=fa]")) newsUsed(a.href.startsWith("https://translate.google.com/") ? "translate" : "read", globalCategory);
-  } else if (PERSIAN_TABS.includes(tab)) {
-    newsUsed("persian-read");
-  }
-});
-
-// The controls of a list: `primary` always in sight (the period and the order), the rest behind «فیلتر», whose number
-// says how many of them are on. The panel stays open across the list's redraws (a change of a filter draws it again).
-const filtersOpen = {};
-function controlsHtml(primary, filters = "", active = 0) {
-  const open = !!filtersOpen[tab];
-  return `<div class="controls">${primary}${filters ? `<button id="ftoggle" class="btn ghost small" type="button" aria-expanded="${open}" aria-controls="fpanel">فیلتر${active ? ` <span class="count">${fa(active)}</span>` : ""}</button>` : ""}</div>
-    ${filters ? `<div id="fpanel" class="controls filters"${open ? "" : " hidden"}>${filters}</div>` : ""}`;
-}
-function wireControls() {
-  const toggle = document.getElementById("ftoggle");
-  if (!toggle) return;
-  toggle.onclick = () => {
-    filtersOpen[tab] = !filtersOpen[tab];
-    document.getElementById("fpanel").hidden = !filtersOpen[tab];
-    toggle.setAttribute("aria-expanded", String(filtersOpen[tab]));
-  };
-}
 
 async function showGlobal(id) {
   if (!state?.foreignNews) {
