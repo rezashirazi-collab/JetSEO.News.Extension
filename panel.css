@@ -99,6 +99,13 @@ ul.list li.ours { list-style: "★ " }
 .center p { margin: 0 0 14px }
 label.row { display: flex; gap: 8px; align-items: center; margin: 6px 0 }
 textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 6px; resize: vertical }
+/* «Global»: the one English, left-to-right tab. Vazirmatn's Latin is fine; only the direction and line height change */
+.global { direction: ltr; text-align: left; line-height: 1.6 }
+.global.center { text-align: center; max-width: 520px; margin: 0 auto }
+.global .card h3 { font-size: 14px; line-height: 1.5 }
+.global .controls label { display: inline-flex; gap: 6px; align-items: center }
+.global .card.dismissed { opacity: .6 }
+.tabs button[lang="en"] { font-family: "Segoe UI", system-ui, sans-serif }
 /* the full-page view: content centred, the dashboard's sections side by side */
 body.page { font-size: 14px }
 body.page .top, body.page .tabs { padding-inline: max(16px, calc((100% - 1200px) / 2)) }

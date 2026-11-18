@@ -3,11 +3,14 @@
 A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel (or a full page) with a dashboard and these tabs:
 - **سوژه‌های داغ:** stories that several Iranian news sites are telling right now. Each shows how many Telegram channels told it too, «اول در تلگرام» when a channel was ahead of the sites, and a «ترند» badge when it matches a Google or Wikipedia trend. «کپی» copies it (headline and source links) for the team's Telegram or Bale group.
 - **شکاف پوشش:** stories your competitors published and your site did not.
+- **Global:** stories several international (English) sources are telling. A story is marked «Seen in Persian media» when a Persian headline holds its Latin names («GPT», «OpenAI»); a story without the mark may still be told in Persian with every name in Persian letters. The one English, left-to-right tab. JetSEO translates nothing and asks no language model: every headline has «Read» (the article) and «Translate» (Google Translate's Persian page of that article, in a new tab). Only for tiers with «خبر خارجی» (the admin sets it per tier); other subscribers see what the tab is and the link to the plans.
+  - On each story: «On your site» when one of the team's own sites has it, «+3 in 3h» when sources are picking it up now (and a «Rising» sort), «Watched keyword» for the team's or your own watched words (a Latin word such as `OpenAI` matches the English headlines), «Angles» (what readers in Iran search along with the story's names, from Google's autocomplete), and «Take» / «Dismiss», which mark the story for the whole team: a taken story shows who is writing it, a dismissed one is hidden for everyone until «Show dismissed».
+  - A watched word in a new foreign story is notified like the Persian ones; the dashboard has a tile and a list for the tab.
 - **تلگرام:** stories only Telegram channels have told so far (no site yet), or the posts spreading fastest for their channel.
 - **چندرسانه‌ای:** for a multimedia desk, from the hot stories: those other sites made a video, photos, an infographic or audio for («کار شده»), and those at least 3 sites told with none yet («فرصت»). The server keeps no media type, so it is read from the headline's marker («فیلم/ …», «… + تصاویر») or the URL's section (`/video/`, `/photo/`, `/media/`); a headline without one is missed.
 - **مطالب ما:** your site's articles of the last 24 hours, how many minutes after the first competitor each came out, «مقایسه تیتر» (the headlines other sites gave the same story, from the `topics` endpoint, and the words most of them use and yours does not), and a news SEO check of any of them (title, description, H1, canonical, robots, the image Discover needs, NewsArticle data, publish time, language).
 - **ترند گوگل:** today's searches in Iran.
-- **ترند ویکی‌پدیا:** Persian Wikipedia articles whose reads jumped yesterday (at least twice the day before and the week before), the most read, or the hot edits: articles several people edited in the last 3 hours, which is where a death or an event shows first.
+- **ترند ویکی‌پدیا:** Persian Wikipedia articles whose reads jumped yesterday (at least twice the day before and the week before), the most read, or the hot edits: articles several people edited in the last 3 hours, which is where a death or an event shows first. «انگلیسی، بدون فارسی» lists English Wikipedia's most-read articles of the day that have no Persian article yet.
 - **مناسبت‌ها:** today, tomorrow or the day after from Wikipedia's day pages: events, births and deaths with how many years ago (round anniversaries first) and the world days.
 - **تنظیمات:** your own filters and alerts.
 
@@ -53,7 +56,9 @@ Chrome 116 or later.
   - `mine?siteId=&hours=`: the site's own articles, with each one's lag behind the first competitor.
   - `check?url=`: news SEO check of one article, for the team's own sites only.
   - `telegram?mode=only|trend&hours=`: stories only channels told, or the fastest-spreading posts.
-  - Free, signed in only: `google`, `wiki?mode=rising|top|edits`, `days?offset=0..2`.
+  - `foreign?hours=&category=`: international stories, each with `covers`: the Persian headlines found for it, if any. 403 `{reason: "no-foreign"}` when the tier does not include it; `state.foreignNews` says so beforehand, and a server without that field hides the tab.
+  - `POST foreign/mark?storyId=&status=taken|dismissed|none`: the team's mark on a foreign story.
+  - Free, signed in only: `google`, `wiki?mode=rising|top|edits|missing`, `days?offset=0..2`.
   - A 401 means signed out; the extension forgets the token. A 403 `{reason: "no-module"}` means no subscription; only Google Trends, Wikipedia trends and the occasions stay.
 - **Google's autocomplete** (`suggestqueries.google.com`, the «زاویه‌ها»): read directly, since Google Search is not filtered in Iran. An optional host permission, asked on the first «زاویه‌ها» click: a new required one would disable the extension on update until each user approves it.
 - **Nothing else.** Google Trends, Wikipedia and Telegram are filtered in Iran, so the extension never reads them itself: CoreApi and JetSEO's news loop read them through ai.jetseo.ir (design doc 11-7 in the JetSEO repository).

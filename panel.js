@@ -94,7 +94,9 @@ async function start() {
   };
   const a = state.access;
   tabsNav.hidden = false;
-  for (const b of tabsNav.querySelectorAll("button")) b.hidden = !a && !FREE_TABS.includes(b.dataset.tab);
+  // «Global» only when the server knows it (state.foreignNews); a tier without it still sees the tab, which says what it is
+  for (const b of tabsNav.querySelectorAll("button")) b.hidden = (!a && !FREE_TABS.includes(b.dataset.tab)) || (b.dataset.tab === "global" && !("foreignNews" in state));
+  if (tab === "global" && !("foreignNews" in state)) tab = "dash";
   if (!a) {
     if (!FREE_TABS.includes(tab)) tab = "dash";
     const ended = state.endedAt ? "اشتراک جت‌سئو نیوز شما تمام شده است." : "جت‌سئو نیوز برای حساب شما فعال نیست.";
@@ -156,7 +158,7 @@ function show(name) {
   tab = name;
   for (const b of tabsNav.querySelectorAll("button")) b.classList.toggle("on", b.dataset.tab === name);
   const id = ++loadId;
-  ({ dash: showDash, topics: showTopics, gap: showGap, mine: showMine, trends: showTrends, wiki: showWiki, days: showDays, telegram: showTelegram, media: showMedia, settings: showSettings })[name](id);
+  ({ dash: showDash, topics: showTopics, gap: showGap, global: showGlobal, mine: showMine, trends: showTrends, wiki: showWiki, days: showDays, telegram: showTelegram, media: showMedia, settings: showSettings })[name](id);
 }
 
 tabsNav.addEventListener("click", (e) => {
@@ -241,11 +243,12 @@ async function showDash(id) {
   const gapS = pick((s) => s.hasFeed && s.competitors);
   const mineS = pick((s) => s.hasFeed);
   const get = (path) => newsApi(path).then((r) => (r.status === 200 ? r.data : null));
-  const [topics, gap, tg, mine, google, wiki, days] = await Promise.all([
+  const [topics, gap, tg, mine, foreign, google, wiki, days] = await Promise.all([
     a && get(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`),
     a && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.gapHours}`),
     a && get(`telegram?mode=only&hours=${prefs.telegramHours}`),
     a && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
+    a && state.foreignNews && get(`foreign?hours=${prefs.globalHours}`),
     get("google"), get("wiki?mode=rising"), get("days?offset=0"),
   ]);
   const skipped = await newsSkipped();
@@ -255,6 +258,7 @@ async function showDash(id) {
   const hot = topics ? newsPersonal(topics.stories, prefs) : null;
   const gaps = gap ? newsPersonal(gap.stories, prefs).filter((s) => !skipped.has(`${gapS.id}:${s.id}`)) : null;
   const tgOnly = tg ? newsPersonal(tg.stories, prefs) : null;
+  const global = foreign ? newsGlobal(foreign.stories, prefs) : null;
   const trends = google?.trends ?? null;
   const rising = wiki ? (wiki.items ?? []).filter((x) => x.base > 0).map((x) => ({ ...x, ratio: x.views / x.base })).sort((x, y) => y.ratio - x.ratio) : null;
   const round = days ? (days.entries ?? []).filter((e) => e.ago % 5 === 0) : null;
@@ -269,6 +273,7 @@ async function showDash(id) {
     tile("gap", gapS ? count(gaps) : "—", "شکاف پوشش", gaps?.length ? "bad" : "ok"),
     tile("telegram", count(tgOnly), "فقط در تلگرام"),
     tile("mine", mine && first + late.length ? `${fa(Math.round((100 * first) / (first + late.length)))}٪` : "—", "اول منتشر کردید"),
+    ...(state.foreignNews ? [tile("global", count(global), `سوژه خارجی (${fa(prefs.globalHours)} ساعت)`)] : []),
   ] : []).concat([
     tile("trends", count(trends), "ترند گوگل"),
     tile("wiki", count(rising), "ویکی رو به رشد"),
@@ -285,6 +290,7 @@ async function showDash(id) {
     section(`شکاف پوشش ${gapS ? `<span class="muted" dir="ltr">${esc(gapS.domain)}</span>` : ""}`, "gap", gaps?.length && `<ul class="list">${gaps.slice(0, 3).map((s) =>
       `<li><a href="${safeUrl(s.items?.[0]?.url)}" target="_blank" rel="noopener">${esc(s.title)}</a> <span class="muted">رقبا: ${esc((s.competitors ?? []).join("، "))}</span></li>`).join("")}</ul>`) +
     section(`سرعت انتشار ما (۲۴ ساعت)`, "mine", speed) +
+    section("سوژه‌های رسانه‌های خارجی", "global", global && bars(global.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources, text: `${fa(s.sources)} منبع` })))) +
     section("ترندهای گوگل", "trends", trends && bars(trends.slice(0, 6).map((t) => ({ label: t.title, href: newsUrl(t.title), value: trafficNumber(t.traffic), text: t.traffic ? esc(t.traffic) : "" })))) +
     section("ویکی‌پدیا: رو به رشد", "wiki", rising && bars(rising.slice(0, 5).map((x) => ({ label: x.article.replace(/_/g, " "), href: wikiLink(x.article), value: x.ratio, text: `${fa(Math.round(x.ratio))} برابر` })))) +
     section(`مناسبت‌های امروز${days?.solar ? ` (${esc(days.solar)})` : ""}`, "days", days && (round.length || days.occasions?.length) && `<ul class="list">${[
@@ -387,6 +393,150 @@ async function showGap(id) {
       : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
   chrome.runtime.sendMessage({ type: "news-gap-seen", ids: stories.map((s) => `${site.id}:${s.id}`) }).catch(() => {});
   document.getElementById("gap-count").hidden = true;
+}
+
+// «Global»: stories several foreign (English) sources told, with the Persian headlines the server found for them, if any (api/News/foreign).
+// English and left to right, unlike every other tab: the headlines are English. JetSEO translates nothing: each headline
+// links to its article and to Google Translate's page of that article, in a new tab.
+const translateUrl = (u) => (/^https?:\/\//i.test(String(u ?? "")) ? `https://translate.google.com/translate?sl=auto&tl=fa&u=${encodeURIComponent(u)}` : "#");
+const CATEGORY_EN = { general: "World news", agency: "Agencies", economy: "Economy & crypto", tech: "Technology", science: "Science", health: "Health", auto: "Cars", sport: "Sport", culture: "Culture & games" };
+
+function agoEn(at, now) {
+  const minutes = Math.max(0, Math.round((Date.parse(now) - Date.parse(at)) / 60000));
+  if (!isFinite(minutes)) return "";
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+
+// s.covers: Persian headlines that hold the story's Latin names («GPT», «OpenAI»); s.ours: the same on the team's own
+// sites. The server finds only those: a story without one may still be told in Persian with every name in Persian
+// letters, so no card says «not covered». s.recent: sources that joined in the last risingHours; s.watch: a watched
+// word (the team's, or the user's own: newsGlobal); s.key: its names, for «Angles»; s.mark: the team's mark.
+function globalCard(s, now, risingHours) {
+  const items = s.items ?? [];
+  const covers = s.covers ?? [];
+  const ours = s.ours ?? [];
+  // the story's own buttons open its first source's article
+  const first = items[0];
+  const headlines = items.map((i) => `<li><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a>
+      <span class="muted">${esc(i.source)} · ${agoEn(i.at, now)} · <a href="${esc(translateUrl(i.url))}" target="_blank" rel="noopener">Translate</a></span></li>`).join("");
+  const persian = (list) => list.map((c) => `<li><a href="${safeUrl(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="muted">${esc(c.source)}</span></li>`).join("");
+  const taken = s.mark?.status === "taken";
+  const dismissed = s.mark?.status === "dismissed";
+  const by = s.mark ? `${esc(s.mark.by || "a teammate")} · ${agoEn(s.mark.at, now)}` : "";
+  return `<article class="card${dismissed ? " dismissed" : ""}">
+    <h3>${esc(s.title)}</h3>
+    <div class="meta">
+      ${taken ? `<span class="badge tg" title="Somebody on your team is writing this">Taken by ${by}</span>` : ""}
+      ${dismissed ? `<span class="badge">Dismissed by ${by}</span>` : ""}
+      ${s.watch ? `<span class="badge watch">Watched keyword</span>` : ""}
+      ${ours.length ? `<span class="badge ok">On your site</span>` : covers.length ? `<span class="badge ok">Seen in Persian media</span>` : ""}
+      <span class="badge">${s.sources} ${s.sources === 1 ? "source" : "sources"}</span>
+      ${s.recent >= 2 ? `<span class="badge new" title="Sources that picked the story up in the last ${risingHours} hours">+${s.recent} in ${risingHours}h</span>` : ""}
+      ${first ? `<span>First: ${esc(first.source)} · ${agoEn(s.firstAt, now)}</span>
+      <a class="btn ghost small" href="${safeUrl(first.url)}" target="_blank" rel="noopener">Read</a>
+      <a class="btn ghost small" href="${esc(translateUrl(first.url))}" target="_blank" rel="noopener" title="Opens Google Translate's Persian page of this article">Translate</a>` : ""}
+      ${s.key ? `<button class="btn ghost small" type="button" data-gangles="${esc(s.key)}" title="What Persian-speaking readers search for along with this story's names">Angles</button>` : ""}
+      <button class="btn ghost small" type="button" data-mark="${taken ? "none" : "taken"}" data-story="${esc(s.id)}" title="${taken ? "Free the story for your team" : "Tell your team you are writing this"}">${taken ? "Release" : "Take"}</button>
+      <button class="btn ghost small" type="button" data-mark="${dismissed ? "none" : "dismissed"}" data-story="${esc(s.id)}" title="${dismissed ? "Show the story to your team again" : "Hide the story for your whole team"}">${dismissed ? "Restore" : "Dismiss"}</button>
+    </div>
+    <div class="angles"></div>
+    <details><summary>Headlines (${items.length})</summary><ul>${headlines}</ul></details>
+    ${ours.length ? `<details open><summary>On your site (${ours.length})</summary><ul dir="rtl" lang="fa">${persian(ours)}</ul></details>` : ""}
+    ${covers.length ? `<details><summary>Persian headlines found (${covers.length})</summary><ul dir="rtl" lang="fa">${persian(covers)}</ul></details>` : ""}
+  </article>`;
+}
+
+// «Take», «Dismiss» and their undo on a «Global» story: the team's mark (api/News/foreign/mark), then the list again,
+// as every member now sees it.
+main.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-mark]");
+  if (!b) return;
+  b.disabled = true;
+  const res = await newsApi(`foreign/mark?storyId=${encodeURIComponent(b.dataset.story)}&status=${encodeURIComponent(b.dataset.mark)}`, "POST");
+  if (res.status === 200) return show("global");
+  b.disabled = false;
+  b.textContent = "Not saved";
+});
+
+// «Angles» of a «Global» story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
+// fewer of them until Google knows the phrase. On the click only, like the Persian stories' «زاویه‌ها».
+main.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-gangles]");
+  if (!b) return;
+  // in the click's user gesture, before anything is awaited; true at once when already granted
+  const allowed = chrome.permissions.request({ origins: [SUGGEST_ORIGIN] }).catch(() => false);
+  const out = b.closest(".card").querySelector(".angles");
+  b.disabled = true;
+  if (!(await allowed)) {
+    b.disabled = false;
+    out.innerHTML = `<div class="muted">Angles come from Google Search's suggestions; they need your permission to read it.</div>`;
+    return;
+  }
+  const words = b.dataset.gangles.split(/\s+/).filter(Boolean);
+  let q = "", angles = [];
+  for (q of new Set([words.length, 2, 1].map((n) => words.slice(0, n).join(" ")))) {
+    angles = await suggestions(q);
+    if (angles.length) break;
+  }
+  out.innerHTML = angles.length ? angleChips(angles, q, "What readers in Iran search with it") : `<div class="muted">Google suggests nothing for this story's names.</div>`;
+  b.hidden = true;
+});
+
+// «Top»: most sources (the server's order). «Rising»: most sources in the last hours, the stories growing now.
+const GLOBAL_SORTS = {
+  top: { name: "Top", by: () => 0 },
+  rising: { name: "Rising", by: (a, b) => b.recent - a.recent },
+  newest: { name: "Newest", by: (a, b) => Date.parse(b.firstAt) - Date.parse(a.firstAt) },
+};
+// until the panel closes: a look at what the team set aside, not a setting
+let globalShowDismissed = false;
+
+async function showGlobal(id) {
+  const panel = safeUrl(state?.panelUrl);
+  if (!state?.foreignNews) {
+    main.innerHTML = `<div class="global center" dir="ltr" lang="en">
+      <p><strong>Global stories</strong></p>
+      <p>Stories international media are reporting right now, before Persian media pick them up, each with a link to the article and to its Persian translation.</p>
+      <p class="muted">Not part of your current JetSEO News plan. ${state?.access?.role === "owner" ? `<a href="${panel}" target="_blank" rel="noopener">See the plans</a>` : "Ask your subscription owner to upgrade."}</p>
+    </div>`;
+    return;
+  }
+  const prefs = await newsPrefs();
+  const categories = state.foreignCategories ?? [];
+  const category = categories.includes(prefs.globalCategory) ? prefs.globalCategory : "";
+  main.innerHTML = `<div class="global" dir="ltr" lang="en">
+    <div class="controls">
+      <label>Period <select id="glhours">${[6, 24, 72].map((h) => `<option value="${h}" ${h === prefs.globalHours ? "selected" : ""}>${h} hours</option>`).join("")}</select></label>
+      ${categories.length > 1 ? `<label>Category <select id="glcat"><option value="">All</option>${categories.map((c) => `<option value="${esc(c)}" ${c === category ? "selected" : ""}>${esc(CATEGORY_EN[c] ?? c)}</option>`).join("")}</select></label>` : ""}
+      <label title="Science and health sites seldom tell the same story: choose 1+ for those">Sources <select id="glmin"><option value="0">Default</option>${[1, 2, 3, 5].map((m) => `<option value="${m}" ${m === prefs.globalMinSources ? "selected" : ""}>${m}+</option>`).join("")}</select></label>
+      <label>Sort <select id="glsort">${Object.entries(GLOBAL_SORTS).map(([key, sort]) => `<option value="${key}" ${key === prefs.globalSort ? "selected" : ""}>${sort.name}</option>`).join("")}</select></label>
+      <label><input id="glseen" type="checkbox" ${prefs.globalHideSeen ? "checked" : ""} /> Hide stories seen in Persian media</label>
+      <label><input id="gldismissed" type="checkbox" ${globalShowDismissed ? "checked" : ""} /> Show dismissed</label>
+    </div><div id="list"><div class="empty">Loading…</div></div></div>`;
+  document.getElementById("glhours").onchange = async (e) => { await saveNewsPrefs({ globalHours: +e.target.value }); show("global"); };
+  document.getElementById("glmin").onchange = async (e) => { await saveNewsPrefs({ globalMinSources: +e.target.value }); show("global"); };
+  document.getElementById("glsort").onchange = async (e) => { await saveNewsPrefs({ globalSort: e.target.value }); show("global"); };
+  document.getElementById("gldismissed").onchange = (e) => { globalShowDismissed = e.target.checked; show("global"); };
+  document.getElementById("glseen").onchange = async (e) => { await saveNewsPrefs({ globalHideSeen: e.target.checked }); show("global"); };
+  const cat = document.getElementById("glcat");
+  if (cat) cat.onchange = async (e) => { await saveNewsPrefs({ globalCategory: e.target.value }); show("global"); };
+  const list = document.getElementById("list");
+  const res = await newsApi(`foreign?hours=${prefs.globalHours}${category ? `&category=${encodeURIComponent(category)}` : ""}${prefs.globalMinSources ? `&minSources=${prefs.globalMinSources}` : ""}`);
+  if (id !== loadId) return;
+  if (res.status === 403) return start();
+  if (res.status !== 200) { list.innerHTML = `<div class="empty">Could not load. Press ⟳.</div>`; return; }
+  const all = newsGlobal(res.data.stories, prefs, globalShowDismissed);
+  // the server's order is «top»; a sort that leaves two stories equal keeps it between them
+  const stories = (prefs.globalHideSeen ? all.filter((s) => !s.covers?.length && !s.ours?.length) : all)
+    .sort((GLOBAL_SORTS[prefs.globalSort] ?? GLOBAL_SORTS.top).by);
+  const stale = staleNote(res.data);
+  list.innerHTML = (stale ? `<div dir="rtl" lang="fa">${stale}</div>` : "") +
+    `<p class="muted">Stories at least ${res.data.minSources} international sources reported. “Seen in Persian media” marks a story whose product or company names appear in a Persian headline; a story without the mark may still be covered in Persian, so check before you write.</p>` +
+    (stories.length ? stories.map((s) => globalCard(s, res.data.now, res.data.risingHours)).join("")
+      : `<div class="empty">${all.length ? "Every story of this period was seen in Persian media." : "No story with this many sources in this period."}</div>`);
 }
 
 // «۲ ساعت و ۵ دقیقه»
@@ -536,9 +686,9 @@ function modeBar(modes, current, pick, extra = "") {
 }
 
 // The suggestions as links, each without base, the phrase they were asked for: «گنو پتریاشویلی خداحافظی» → «خداحافظی»
-function angleChips(angles, base) {
+function angleChips(angles, base, heading = "زاویه‌ها (مخاطب این‌ها را هم جستجو می‌کند)") {
   const short = (s) => s.replace(base, "").trim() || s;
-  return `<div class="sub">زاویه‌ها (مخاطب این‌ها را هم جستجو می‌کند)</div><div class="chips">${angles.map((s) =>
+  return `<div class="sub">${heading}</div><div class="chips">${angles.map((s) =>
     `<a class="chip" href="https://www.google.com/search?q=${encodeURIComponent(s)}&hl=fa" target="_blank" rel="noopener" title="${esc(s)}">${esc(short(s))}</a>`).join("")}</div>`;
 }
 
@@ -584,13 +734,25 @@ const newsUrl = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}
 const newsLink = (q) => `<a href="${newsUrl(q)}" target="_blank" rel="noopener">چرا؟ خبرها</a>`;
 
 async function showWiki(id) {
-  const modes = { rising: "رو به رشد", top: "پربازدیدترین", edits: "ویرایش داغ" };
+  const modes = { rising: "رو به رشد", top: "پربازدیدترین", edits: "ویرایش داغ", missing: "انگلیسی، بدون فارسی" };
   const mode = wikiMode;
   modeBar(modes, mode, (v) => { wikiMode = v; show("wiki"); });
   const list = document.getElementById("list");
   const data = await freeApi(id, `wiki?mode=${mode}`, "آمار ویکی‌پدیا", list);
   if (!data) return;
-  if (mode === "edits") {
+  if (mode === "missing") {
+    // English Wikipedia's most-read articles with no Persian one: what the world reads about and Persian has not caught up with
+    const items = data.items ?? [];
+    const date = new Date(data.day).toLocaleDateString("fa-IR", { timeZone: "UTC" });
+    const enLink = (article) => `https://en.wikipedia.org/wiki/${encodeURIComponent(article)}`;
+    list.innerHTML = `<p class="muted">پربازدیدترین مقاله‌های ویکی‌پدیای انگلیسی در ${esc(date)} که مقاله فارسی ندارند: فیلم، آدم یا رویدادی که دنیا درباره‌اش می‌خواند و هنوز به فارسی نیامده است.</p>` +
+      (items.length ? items.map((a) => `<article class="card">
+      <h3 dir="ltr" lang="en" style="text-align:left"><a href="${enLink(a.article)}" target="_blank" rel="noopener">${esc(a.article.replace(/_/g, " "))}</a></h3>
+      <div class="meta"><span class="badge">${fa(a.views)} بازدید</span>
+        <a href="${esc(translateUrl(enLink(a.article)))}" target="_blank" rel="noopener">ترجمه مقاله</a>
+        ${newsLink(a.article.replace(/_/g, " "))}</div>
+    </article>`).join("") : `<div class="empty">همه مقاله‌های پربازدید انگلیسی این روز، مقاله فارسی دارند.</div>`);
+  } else if (mode === "edits") {
     const edits = data.edits ?? [];
     list.innerHTML = `<p class="muted">مقاله‌هایی از ویکی‌پدیای فارسی که در ۳ ساعت اخیر چند نفر ویرایششان کرده‌اند (بدون ربات‌ها).</p>` +
       (edits.length ? edits.map((p) => `<article class="card">
@@ -811,7 +973,7 @@ async function showSettings() {
       <p class="muted" style="margin:0">فقط برای خودتان. فیلترهای تیم (برای همه اعضا) در پنل جت‌سئو هستند${owner ? `: <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=filters")}" target="_blank" rel="noopener">فیلترهای تیم</a>` : ""}.</p>
       <label for="excluded">کلمات مستثنی (با ویرگول جدا شوند؛ فقط کلمه کامل)</label>
       <textarea id="excluded">${esc(prefs.excluded.join("، "))}</textarea>
-      <label for="watch">کلیدواژه‌های تحت نظر من (با ویرگول؛ فقط کلمه کامل). کنار کلیدواژه‌های تیم، برچسب و هشدار می‌گیرند.</label>
+      <label for="watch">کلیدواژه‌های تحت نظر من (با ویرگول؛ فقط کلمه کامل). کنار کلیدواژه‌های تیم، برچسب و هشدار می‌گیرند. کلمه لاتین (مثل <span dir="ltr">OpenAI</span>) در سوژه‌های خارجی تب <span dir="ltr">Global</span> هم هشدار می‌دهد.</label>
       <textarea id="watch">${esc(prefs.watch.join("، "))}</textarea>
       <label for="muted">منابع بی‌صدا (دامنه، با ویرگول)</label>
       <textarea id="muted" dir="ltr">${esc(prefs.muted.join(", "))}</textarea>
