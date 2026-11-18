@@ -52,18 +52,25 @@ async function newsSignOut() {
   }
 }
 
-// GET an api/News path: { status, data }. status 0 = no network; a 401 forgets the account.
-async function newsApi(path) {
+// An api/News path, GET unless method says POST (the team's marks): { status, data }. status 0 = no network; a 401
+// forgets the account.
+async function newsApi(path, method = "GET") {
   const account = await newsAccount();
   if (!account) return { status: 401, data: null };
   try {
-    const response = await fetch(`${NEWS_API}/${path}`, { credentials: "omit", headers: { "X-JetSEO-User": account.token, Accept: "application/json" } });
+    const response = await fetch(`${NEWS_API}/${path}`, { method, credentials: "omit", headers: { "X-JetSEO-User": account.token, Accept: "application/json" } });
     if (response.status === 401) await chrome.storage.local.remove(NEWS_ACCOUNT_KEY);
     const data = response.headers.get("content-type")?.includes("json") ? await response.json() : null;
     return { status: response.status, data };
   } catch (error) {
     return { status: 0, data: null };
   }
+}
+
+// Counts one use of the foreign stories for JetSEO's own report (api/News/used: opening the list, reading or translating
+// an article, the angles; only the action and the category, never the story). Not waited for: a count that fails is lost.
+function newsUsed(what, category = "") {
+  newsApi(`used?what=${encodeURIComponent(what)}${category ? `&category=${encodeURIComponent(category)}` : ""}`, "POST");
 }
 
 // How the toolbar icon opens the app: "tab", a full page (the default), or "panel", Chrome's side panel.
@@ -96,10 +103,19 @@ async function newsPrefs() {
     notifyGap: prefs.notifyGap ?? true,
     notifyWatch: prefs.notifyWatch ?? true,
     topicHours: prefs.topicHours ?? 3,
+    topicSort: prefs.topicSort ?? "top",
+    topicHideOurs: prefs.topicHideOurs ?? false,
     minSources: prefs.minSources ?? 2,
     gapHours: prefs.gapHours ?? 6,
     telegramHours: prefs.telegramHours ?? 6,
     mediaHours: prefs.mediaHours ?? 6,
+    globalHours: prefs.globalHours ?? 24,
+    globalCategory: prefs.globalCategory ?? "",
+    globalSort: prefs.globalSort ?? "top",
+    // lists the user switched off in «تنظیمات» (panel.js TAB_NAMES keys)
+    hiddenTabs: prefs.hiddenTabs ?? [],
+    // off by default: «seen in Persian media» is a match on Latin names only, too weak to hide a story unasked
+    globalHideSeen: prefs.globalHideSeen ?? false,
   };
 }
 
@@ -127,6 +143,15 @@ function newsMatches(foldedText, word) {
 function newsWatched(title, prefs) {
   const folded = newsFold(title);
   return prefs.watch.some((w) => newsMatches(folded, w));
+}
+
+// «Global» stories as the user sees them: watch also for one of the user's own watched words (a Latin one, «openai»,
+// matches the English headlines as it is; the server set watch for the team's), and without the stories the team
+// dismissed unless showDismissed. The Persian filters (excluded words, topics, muted sources) do not apply.
+function newsGlobal(stories, prefs, showDismissed = false) {
+  return (stories ?? [])
+    .filter((s) => showDismissed || s.mark?.status !== "dismissed")
+    .map((s) => (!s.watch && (s.items ?? []).some((i) => newsWatched(i.title, prefs)) ? { ...s, watch: true } : s));
 }
 
 // The stories the user's own filters leave: none of their words in any headline, none only from muted sources, and of

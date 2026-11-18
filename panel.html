@@ -16,20 +16,13 @@
       <button type="button" data-view="panel">پنل کناری</button>
     </div>
     <button id="refresh" class="icon" type="button" title="به‌روزرسانی" aria-label="به‌روزرسانی">⟳</button>
+    <button id="settings" class="icon" type="button" title="تنظیمات" aria-label="تنظیمات" hidden>⚙</button>
   </header>
   <div id="banner" hidden></div>
-  <nav id="tabs" class="tabs" hidden aria-label="بخش‌ها">
-    <button type="button" data-tab="dash" class="on">داشبورد</button>
-    <button type="button" data-tab="topics">سوژه‌های داغ</button>
-    <button type="button" data-tab="gap">شکاف پوشش <span id="gap-count" class="count" hidden></span></button>
-    <button type="button" data-tab="mine">مطالب ما</button>
-    <button type="button" data-tab="telegram">تلگرام</button>
-    <button type="button" data-tab="media">چندرسانه‌ای</button>
-    <button type="button" data-tab="trends">ترند گوگل</button>
-    <button type="button" data-tab="wiki">ترند ویکی‌پدیا</button>
-    <button type="button" data-tab="days">مناسبت‌ها</button>
-    <button type="button" data-tab="settings">تنظیمات</button>
-  </nav>
+  <div id="whatsnew" hidden></div>
+  <!-- the four sections; panel.js fills both rows from what the account may open (renderNav) -->
+  <nav id="tabs" class="tabs" hidden aria-label="بخش‌ها"></nav>
+  <nav id="subtabs" class="tabs sub" hidden aria-label="فهرست‌های این بخش"></nav>
   <main id="main" aria-live="polite"></main>
   <script src="api.js"></script>
   <script src="panel.js"></script>

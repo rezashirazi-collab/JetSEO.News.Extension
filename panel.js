@@ -80,7 +80,8 @@ async function start() {
   const res = await newsApi("state");
   if (res.status === 401) return signedOut();
   if (res.status !== 200) {
-    tabsNav.hidden = true;
+    state = null;
+    renderNav();
     main.innerHTML = `<div class="center"><p>اتصال به جت‌سئو برقرار نشد.</p><button class="btn ghost" id="retry" type="button">دوباره</button></div>`;
     document.getElementById("retry").onclick = start;
     return;
@@ -93,10 +94,9 @@ async function start() {
     signedOut();
   };
   const a = state.access;
-  tabsNav.hidden = false;
-  for (const b of tabsNav.querySelectorAll("button")) b.hidden = !a && !FREE_TABS.includes(b.dataset.tab);
+  hiddenTabs = (await newsPrefs()).hiddenTabs;
+  if (tab !== "settings" && !tabAvailable(tab)) tab = "dash";
   if (!a) {
-    if (!FREE_TABS.includes(tab)) tab = "dash";
     const ended = state.endedAt ? "اشتراک جت‌سئو نیوز شما تمام شده است." : "جت‌سئو نیوز برای حساب شما فعال نیست.";
     setBanner(`${ended} ترند گوگل و ویکی‌پدیا و مناسبت‌ها رایگان است؛ سوژه‌های داغ رسانه‌ها، شکاف پوشش و تلگرام با اشتراک. <a href="${safeUrl(state.panelUrl)}" target="_blank" rel="noopener">${state.endedAt ? "تمدید" : "خرید یا ۷ روز رایگان"}</a>`, !!state.endedAt);
   } else if (a.daysLeft <= 7) {
@@ -112,6 +112,7 @@ async function start() {
   const prefs = await newsPrefs();
   const keep = prefs.topics.filter((k) => offeredTopics().some((t) => t.key === k));
   if (state.topics && keep.length !== prefs.topics.length) await saveNewsPrefs({ topics: keep });
+  showWhatsNew();
   if (!(await takeGo())) show(tab);
 }
 
@@ -121,7 +122,7 @@ async function takeGo() {
   const { newsGo: go } = await chrome.storage.session.get("newsGo").catch(() => ({}));
   if (!go?.tab) return false;
   await chrome.storage.session.remove("newsGo");
-  if (!state?.access && !FREE_TABS.includes(go.tab)) return false;
+  if (!TAB_NAMES[go.tab] || (!state?.access && !FREE_TABS.includes(go.tab)) || (go.tab === "global" && !("foreignNews" in state))) return false;
   let host = "";
   try { host = new URL(go.url).hostname.toLowerCase(); } catch (error) {}
   const site = (state.sites ?? []).find((s) => {
@@ -136,7 +137,7 @@ async function takeGo() {
 
 function signedOut() {
   state = null;
-  tabsNav.hidden = true;
+  renderNav();
   who.textContent = "";
   setBanner(null);
   main.innerHTML = `<div class="center">
@@ -152,17 +153,72 @@ function signedOut() {
   };
 }
 
+// The lists, in four sections: the top row is the sections, the second the lists of the open one (hidden when it has
+// one). «تنظیمات» is the header's gear, not a list.
+const TAB_NAMES = {
+  dash: "داشبورد", topics: "سوژه‌های داغ", gap: "شکاف پوشش", telegram: "تلگرام", media: "چندرسانه‌ای", global: "رسانه‌های خارجی",
+  trends: "ترند گوگل", wiki: "ویکی‌پدیا", days: "مناسبت‌ها", mine: "مطالب ما",
+};
+const GROUPS = [
+  { key: "today", name: "امروز", tabs: ["dash"] },
+  { key: "stories", name: "سوژه‌ها", tabs: ["topics", "gap", "telegram", "media", "global"] },
+  { key: "trends", name: "ترندها", tabs: ["trends", "wiki", "days"] },
+  { key: "site", name: "سایت ما", tabs: ["mine"] },
+];
+const subtabsNav = document.getElementById("subtabs");
+const settingsButton = document.getElementById("settings");
+// the lists the user switched off in «تنظیمات» (prefs.hiddenTabs), read at start
+let hiddenTabs = [];
+// the list last open in each section, for the click on the section
+const lastTab = {};
+
+// A list this account may open now: the free ones without the module, «رسانه‌های خارجی» only when the server knows it
+// (a tier without it still gets the list, which says what it is), and none the user switched off.
+function tabAvailable(name) {
+  if (!state || !TAB_NAMES[name] || hiddenTabs.includes(name)) return false;
+  if (!state.access && !FREE_TABS.includes(name)) return false;
+  return name !== "global" || "foreignNews" in state;
+}
+
+function renderNav() {
+  const groups = state ? GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter(tabAvailable) })).filter((g) => g.tabs.length) : [];
+  const open = groups.find((g) => g.tabs.includes(tab));
+  tabsNav.hidden = !groups.length;
+  settingsButton.hidden = !state;
+  settingsButton.classList.toggle("on", tab === "settings");
+  tabsNav.innerHTML = groups.map((g) => `<button type="button" data-group="${g.key}" class="${g === open ? "on" : ""}" aria-pressed="${g === open}">${g.name}${
+    g.key === "stories" && gapBadge ? ` <span class="count" title="شکاف پوشش دیده‌نشده">${fa(gapBadge)}</span>` : ""}</button>`).join("");
+  subtabsNav.hidden = !open || open.tabs.length < 2;
+  subtabsNav.innerHTML = open ? open.tabs.map((t) => `<button type="button" data-tab="${t}" class="${t === tab ? "on" : ""}" aria-pressed="${t === tab}">${TAB_NAMES[t]}${
+    t === "gap" && gapBadge ? ` <span class="count">${fa(gapBadge)}</span>` : ""}</button>`).join("") : "";
+}
+
+// the unseen coverage gaps from the background's last round (the icon's number), until «شکاف پوشش» is opened
+let gapBadge = 0;
+
 function show(name) {
   tab = name;
-  for (const b of tabsNav.querySelectorAll("button")) b.classList.toggle("on", b.dataset.tab === name);
+  const group = GROUPS.find((g) => g.tabs.includes(name));
+  if (group) lastTab[group.key] = name;
+  if (name === "gap") gapBadge = 0;
+  renderNav();
+  // for JetSEO's use report: which module tabs a member opens (once a half hour each; «رسانه‌های خارجی» counts itself, by category)
+  if (state?.access && PERSIAN_TABS.includes(name)) countOnce(`${name}-open`);
   const id = ++loadId;
-  ({ dash: showDash, topics: showTopics, gap: showGap, mine: showMine, trends: showTrends, wiki: showWiki, days: showDays, telegram: showTelegram, media: showMedia, settings: showSettings })[name](id);
+  ({ dash: showDash, topics: showTopics, gap: showGap, global: showGlobal, mine: showMine, trends: showTrends, wiki: showWiki, days: showDays, telegram: showTelegram, media: showMedia, settings: showSettings })[name](id);
 }
 
 tabsNav.addEventListener("click", (e) => {
+  const group = GROUPS.find((g) => g.key === e.target.closest("button[data-group]")?.dataset.group);
+  if (!group) return;
+  const open = group.tabs.filter(tabAvailable);
+  show(open.includes(lastTab[group.key]) ? lastTab[group.key] : open[0]);
+});
+subtabsNav.addEventListener("click", (e) => {
   const b = e.target.closest("button[data-tab]");
   if (b) show(b.dataset.tab);
 });
+settingsButton.onclick = () => show("settings");
 document.getElementById("refresh").onclick = () => start();
 
 // This page is the full-page view (opened as panel.html?view=tab) or the side panel. The header switch moves to the
@@ -195,29 +251,133 @@ document.getElementById("view").onclick = async (e) => {
 // s.trend: the Google trend or rising Wikipedia article in its headlines; s.channels: Telegram channels that told it
 // (s.sources counts sites); s.telegramLead: minutes the first channel was ahead of the first site. All from the server.
 // s.fresh: not on the list the last time it was in sight (markFresh). body: shown under the meta line, before the headlines.
-function storyCard(s, now, extra = "", body = "") {
-  const items = (s.items ?? []).map((i) =>
-    `<li><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a> <span class="muted">${i.telegram ? "تلگرام · " : ""}${esc(i.source)} · ${ago(i.at, now)}</span></li>`).join("");
-  return `<article class="card${s.fresh ? " fresh" : ""}">
-    <h3>${esc(s.title)}</h3>
+// s.mark, s.ours, s.recent: the team's «برداشتم», a story one of its own sites tells, and the sources that joined in the
+// last risingMinutes (the server's News.RisingMinutes, kept from the last list). A server without them sends none: the
+// card then shows neither the badges nor the «برداشتم» button.
+let risingMinutes = 60;
+// ---------------------------------------------------------------- shared by every list
+
+// «برداشتم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
+// member now sees it.
+main.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-mark]");
+  if (!b) return;
+  b.disabled = true;
+  const res = await newsApi(`mark?storyId=${encodeURIComponent(b.dataset.story)}&status=${encodeURIComponent(b.dataset.mark)}`, "POST");
+  if (res.status === 200) return show(tab);
+  b.disabled = false;
+  b.textContent = "ذخیره نشد";
+});
+
+// for JetSEO's use report (newsUsed): the category on screen, and when the open was last counted (one a half hour:
+// every filter change and mark draws the list again)
+let globalCategory = "";
+const counted = {};
+function countOnce(what, category = "") {
+  const key = `${what}|${category}`;
+  if (Date.now() - (counted[key] ?? 0) < 30 * 60 * 1000) return;
+  counted[key] = Date.now();
+  newsUsed(what, category);
+}
+
+const PERSIAN_TABS = ["topics", "gap", "mine", "telegram", "media"];
+
+// a foreign article opened or sent to Google Translate from a «رسانه‌های خارجی» card (the Persian headlines found are
+// not counted), or a headline opened from a card of the Persian module tabs
+main.addEventListener("click", (e) => {
+  const a = e.target.closest(".card a[href]");
+  if (!a || !/^https?:/.test(a.href)) return;
+  if (a.closest(".global")) {
+    if (!a.closest("ul[lang=fa]")) newsUsed(a.href.startsWith("https://translate.google.com/") ? "translate" : "read", globalCategory);
+  } else if (PERSIAN_TABS.includes(tab)) {
+    newsUsed("persian-read");
+  }
+});
+
+// The controls of a list: `primary` always in sight (the period and the order), the rest behind «فیلتر», whose number
+// says how many of them are on. The panel stays open across the list's redraws (a change of a filter draws it again).
+const filtersOpen = {};
+function controlsHtml(primary, filters = "", active = 0) {
+  const open = !!filtersOpen[tab];
+  return `<div class="controls">${primary}${filters ? `<button id="ftoggle" class="btn ghost small" type="button" aria-expanded="${open}" aria-controls="fpanel">فیلتر${active ? ` <span class="count">${fa(active)}</span>` : ""}</button>` : ""}</div>
+    ${filters ? `<div id="fpanel" class="controls filters"${open ? "" : " hidden"}>${filters}</div>` : ""}`;
+}
+function wireControls() {
+  const toggle = document.getElementById("ftoggle");
+  if (!toggle) return;
+  toggle.onclick = () => {
+    filtersOpen[tab] = !filtersOpen[tab];
+    document.getElementById("fpanel").hidden = !filtersOpen[tab];
+    toggle.setAttribute("aria-expanded", String(filtersOpen[tab]));
+  };
+}
+
+// One layout for every story card (Persian and foreign), so a list reads at a glance:
+//   the headline, a link to the first source's article (ltr: an English headline);
+//   the count badge, then at most two of `badges` (most important first; the rest go under «جزئیات»);
+//   `meta` (more of the line: who told it first), one main button, and the other actions under «⋯».
+// badges, meta, main and menu are HTML already escaped by the caller.
+function cardShell({ title, url, ltr = false, count, badges = [], meta = "", main: mainButton = "", menu = [], body = "", details = "", className = "" }) {
+  const shown = badges.filter(Boolean);
+  return `<article class="card ${className}">
+    <h3${ltr ? ` dir="ltr" lang="en"` : ""}>${url ? `<a href="${safeUrl(url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h3>
     <div class="meta">
-      ${s.fresh ? `<span class="badge new">جدید</span>` : ""}
-      ${s.sources ? `<span class="badge">${fa(s.sources)} منبع</span>` : ""}
-      ${s.channels ? `<span class="badge">${fa(s.channels)} کانال</span>` : ""}
-      ${topicName(s.topic) ? `<span class="badge topic">${esc(topicName(s.topic))}</span>` : ""}
-      ${s.telegramLead > 0 ? `<span class="badge tg">اول در تلگرام · ${duration(s.telegramLead)} زودتر</span>` : ""}
-      ${s.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : ""}
-      ${s.trend ? `<span class="badge trend">ترند ${esc(s.trend.source)}: ${esc(s.trend.text)}</span>` : ""}
-      <span>اولین: ${esc(s.firstSource)} · ${ago(s.firstAt, now)}</span>
-      ${extra}
-      <button class="btn ghost small" type="button" data-angles="${esc(s.trend?.text ?? s.title)}" title="آنچه مخاطب همراه این سوژه جستجو می‌کند">زاویه‌ها</button>
-      <button class="btn ghost small" type="button" data-copy="${esc(storyText(s))}" title="کپی برای پیام‌رسان">کپی</button>
+      ${count}
+      ${shown.slice(0, 2).join("")}
+      ${meta}
+      <span class="acts">${mainButton}
+      ${menu.filter(Boolean).length ? `<details class="menu"><summary aria-label="کارهای دیگر این سوژه" title="کارهای دیگر">⋯</summary><div class="menu-items">${menu.filter(Boolean).join("")}</div></details>` : ""}</span>
     </div>
     ${body}
     <div class="angles"></div>
-    <details><summary>تیترها (${fa(s.items?.length ?? 0)})</summary><ul>${items}</ul></details>
+    <details class="more"><summary>جزئیات</summary>${shown.length > 2 ? `<div class="meta">${shown.slice(2).join("")}</div>` : ""}${details}</details>
   </article>`;
 }
+
+// the team's «برداشتم» on a story (s.mark from the server; a server without marks sends none, and no button shows)
+const takeButton = (s) => ("mark" in s
+  ? `<button class="btn ghost small" type="button" data-mark="${s.mark?.status === "taken" ? "none" : "taken"}" data-story="${esc(s.id)}" title="${s.mark?.status === "taken" ? "سوژه برای تیم آزاد می‌شود" : "به تیم می‌گوید شما روی این سوژه کار می‌کنید"}">${s.mark?.status === "taken" ? "آزاد شد" : "برداشتم"}</button>`
+  : "");
+const takenBadge = (s, now) => (s.mark?.status === "taken"
+  ? `<span class="badge tg" title="یکی از اعضای تیم روی این سوژه کار می‌کند">برداشته: ${esc(s.mark.by || "یکی از اعضا")} · ${ago(s.mark.at, now)}</span>` : "");
+
+// A Persian story. extra: { meta, menu, body } of the list it is in (the competitors and «رد شد» of a gap, the media of «چندرسانه‌ای»).
+function storyCard(s, now, extra = {}) {
+  const items = (s.items ?? []).map((i) =>
+    `<li><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a> <span class="muted">${i.telegram ? "تلگرام · " : ""}${esc(i.source)} · ${ago(i.at, now)}</span></li>`).join("");
+  return cardShell({
+    title: s.title, url: s.items?.[0]?.url, className: s.fresh ? "fresh" : "",
+    count: s.sources ? `<span class="badge">${fa(s.sources)} منبع</span>` : s.channels ? `<span class="badge">${fa(s.channels)} کانال</span>` : "",
+    badges: [
+      takenBadge(s, now),
+      s.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : "",
+      s.ours ? `<span class="badge ok" title="یکی از سایت‌های تیم این سوژه را منتشر کرده است">در سایت شما</span>` : "",
+      s.recent >= 2 ? `<span class="badge new" title="منابعی که در ${fa(risingMinutes)} دقیقه اخیر این سوژه را زده‌اند">${fa(s.recent)} منبع تازه</span>` : "",
+      s.fresh ? `<span class="badge new">جدید</span>` : "",
+      s.telegramLead > 0 ? `<span class="badge tg">اول در تلگرام · ${duration(s.telegramLead)} زودتر</span>` : "",
+      s.trend ? `<span class="badge trend">ترند ${esc(s.trend.source)}: ${esc(s.trend.text)}</span>` : "",
+      s.sources && s.channels ? `<span class="badge">${fa(s.channels)} کانال</span>` : "",
+      topicName(s.topic) ? `<span class="badge topic">${esc(topicName(s.topic))}</span>` : "",
+    ],
+    meta: `<span>اولین: ${esc(s.firstSource)} · ${ago(s.firstAt, now)}</span>${extra.meta ?? ""}`,
+    main: takeButton(s),
+    menu: [
+      `<button type="button" data-angles="${esc(s.trend?.text ?? s.title)}" title="آنچه مخاطب همراه این سوژه جستجو می‌کند">زاویه‌ها</button>`,
+      `<button type="button" data-copy="${esc(storyText(s))}" title="کپی برای پیام‌رسان">کپی</button>`,
+      extra.menu,
+    ],
+    body: extra.body ?? "",
+    details: `<div class="sub">تیترها (${fa(s.items?.length ?? 0)})</div><ul>${items}</ul>`,
+  });
+}
+
+// a click on a «⋯» item closes its menu; a click elsewhere closes every open one
+document.addEventListener("click", (e) => {
+  for (const menu of document.querySelectorAll("details.menu[open]")) {
+    // «کپی» stays open a moment: its «کپی شد» is the only sign that it worked
+    if (!menu.contains(e.target) || e.target.closest(".menu-items button:not([data-copy])")) menu.open = false;
+  }
+});
 
 // «جدید» on the stories not on the list the last time it was in sight: what a hidden page renders (the 3-minute
 // refresh) stays new until it is seen. The first time, the list is the baseline.
@@ -241,11 +401,13 @@ async function showDash(id) {
   const gapS = pick((s) => s.hasFeed && s.competitors);
   const mineS = pick((s) => s.hasFeed);
   const get = (path) => newsApi(path).then((r) => (r.status === 200 ? r.data : null));
-  const [topics, gap, tg, mine, google, wiki, days] = await Promise.all([
-    a && get(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`),
-    a && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.gapHours}`),
-    a && get(`telegram?mode=only&hours=${prefs.telegramHours}`),
-    a && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
+  const [topics, gap, tg, mine, foreign, google, wiki, days] = await Promise.all([
+    // a list switched off in the settings is not asked for
+    a && tabAvailable("topics") && get(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`),
+    a && tabAvailable("gap") && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.gapHours}`),
+    a && tabAvailable("telegram") && get(`telegram?mode=only&hours=${prefs.telegramHours}`),
+    a && tabAvailable("mine") && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
+    a && tabAvailable("global") && state.foreignNews && get(`foreign?hours=${prefs.globalHours}`),
     get("google"), get("wiki?mode=rising"), get("days?offset=0"),
   ]);
   const skipped = await newsSkipped();
@@ -255,6 +417,7 @@ async function showDash(id) {
   const hot = topics ? newsPersonal(topics.stories, prefs) : null;
   const gaps = gap ? newsPersonal(gap.stories, prefs).filter((s) => !skipped.has(`${gapS.id}:${s.id}`)) : null;
   const tgOnly = tg ? newsPersonal(tg.stories, prefs) : null;
+  const global = foreign ? newsGlobal(foreign.stories, prefs) : null;
   const trends = google?.trends ?? null;
   const rising = wiki ? (wiki.items ?? []).filter((x) => x.base > 0).map((x) => ({ ...x, ratio: x.views / x.base })).sort((x, y) => y.ratio - x.ratio) : null;
   const round = days ? (days.entries ?? []).filter((e) => e.ago % 5 === 0) : null;
@@ -264,11 +427,17 @@ async function showDash(id) {
   const none = mineItems.length - first - late.length;
   const count = (list) => (list ? fa(list.length) : "—");
 
+  // «جا مانده‌ها»: the three lists that answer «what did I miss?», as one block: what the competitors told, what the
+  // foreign media told, and what only Telegram channels told so far. A list switched off in the settings has no tile.
+  const on = (name) => tabAvailable(name);
+  const missed = a ? [
+    on("gap") ? tile("gap", gapS ? count(gaps) : "—", "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : "ok") : "",
+    on("global") && state.foreignNews ? tile("global", count(global), `رسانه‌های خارجی (${fa(prefs.globalHours)} ساعت)`) : "",
+    on("telegram") ? tile("telegram", count(tgOnly), "فقط در تلگرام") : "",
+  ].join("") : "";
   const tiles = (a ? [
-    tile("topics", count(hot), `سوژه داغ (${fa(prefs.topicHours)} ساعت)`),
-    tile("gap", gapS ? count(gaps) : "—", "شکاف پوشش", gaps?.length ? "bad" : "ok"),
-    tile("telegram", count(tgOnly), "فقط در تلگرام"),
-    tile("mine", mine && first + late.length ? `${fa(Math.round((100 * first) / (first + late.length)))}٪` : "—", "اول منتشر کردید"),
+    on("topics") ? tile("topics", count(hot), `سوژه داغ (${fa(prefs.topicHours)} ساعت)`) : "",
+    on("mine") ? tile("mine", mine && first + late.length ? `${fa(Math.round((100 * first) / (first + late.length)))}٪` : "—", "اول منتشر کردید") : "",
   ] : []).concat([
     tile("trends", count(trends), "ترند گوگل"),
     tile("wiki", count(rising), "ویکی رو به رشد"),
@@ -280,11 +449,14 @@ async function showDash(id) {
     <div class="legend"><span><i class="s-ok"></i>اول شما ${fa(first)}</span><span><i class="s-late"></i>بعد از رقبا ${fa(late.length)}</span><span><i class="s-none"></i>رقیبی نزده ${fa(none)}</span></div>
     ${late.length ? `<p class="muted" style="margin:4px 0 0">تأخیر میانه: ${duration(median)}</p>` : ""}` : "";
 
-  main.innerHTML = staleNote(topics) + `<div class="tiles">${tiles}</div><div class="dash-grid">` +
+  main.innerHTML = staleNote(topics)
+    + (missed ? `<section class="card missed"><h3>جا مانده‌ها</h3><div class="tiles">${missed}</div></section>` : "")
+    + `<div class="tiles">${tiles}</div><div class="dash-grid">` +
     section(`سوژه‌های داغ رسانه‌ها`, "topics", hot && bars(hot.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources, text: `${fa(s.sources)} منبع` })))) +
     section(`شکاف پوشش ${gapS ? `<span class="muted" dir="ltr">${esc(gapS.domain)}</span>` : ""}`, "gap", gaps?.length && `<ul class="list">${gaps.slice(0, 3).map((s) =>
       `<li><a href="${safeUrl(s.items?.[0]?.url)}" target="_blank" rel="noopener">${esc(s.title)}</a> <span class="muted">رقبا: ${esc((s.competitors ?? []).join("، "))}</span></li>`).join("")}</ul>`) +
     section(`سرعت انتشار ما (۲۴ ساعت)`, "mine", speed) +
+    section("سوژه‌های رسانه‌های خارجی", "global", global && bars(global.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources, text: `${fa(s.sources)} منبع` })))) +
     section("ترندهای گوگل", "trends", trends && bars(trends.slice(0, 6).map((t) => ({ label: t.title, href: newsUrl(t.title), value: trafficNumber(t.traffic), text: t.traffic ? esc(t.traffic) : "" })))) +
     section("ویکی‌پدیا: رو به رشد", "wiki", rising && bars(rising.slice(0, 5).map((x) => ({ label: x.article.replace(/_/g, " "), href: wikiLink(x.article), value: x.ratio, text: `${fa(Math.round(x.ratio))} برابر` })))) +
     section(`مناسبت‌های امروز${days?.solar ? ` (${esc(days.solar)})` : ""}`, "days", days && (round.length || days.occasions?.length) && `<ul class="list">${[
@@ -300,7 +472,7 @@ function bars(rows) {
   if (!rows.length) return "";
   const max = Math.max(...rows.map((r) => r.value || 0), 1);
   return `<div class="bars">${rows.map((r) => `<div class="bar-row">
-      <a class="bar-label" href="${safeUrl(r.href)}" target="_blank" rel="noopener" title="${esc(r.label)}">${esc(r.label)}</a>
+      <a class="bar-label" dir="auto" href="${safeUrl(r.href)}" target="_blank" rel="noopener" title="${esc(r.label)}">${esc(r.label)}</a>
       <span class="bar"><i style="width:${Math.max(4, Math.round((100 * (r.value || 0)) / max))}%"></i></span>
       <span class="bar-val">${r.text}</span></div>`).join("")}</div>`;
 }
@@ -322,57 +494,98 @@ main.addEventListener("click", (e) => {
 
 // the search box's text, kept across the refreshes
 let topicQuery = "";
+// «بیشترین منبع» is the server's order; «رو به رشد»: the stories most sites picked up in the last risingMinutes
+const TOPIC_SORTS = {
+  top: { name: "بیشترین منبع", by: () => 0 },
+  rising: { name: "رو به رشد", by: (a, b) => (b.recent ?? 0) - (a.recent ?? 0) },
+  newest: { name: "تازه‌ترین", by: (a, b) => Date.parse(b.firstAt) - Date.parse(a.firstAt) },
+};
 
 async function showTopics(id) {
   const prefs = await newsPrefs();
-  main.innerHTML = `<div class="controls">
-      <label>بازه <select id="hours">${[1, 3, 6, 12].map((h) => `<option value="${h}" ${h === prefs.topicHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>
-      <label>حداقل منبع <select id="min">${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
-      <input id="q" type="search" placeholder="جستجو در تیترها" aria-label="جستجو در تیترها" value="${esc(topicQuery)}" style="flex:1;min-width:120px" />
-    </div><div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
+  // in sight: the period, the order and the search; behind «فیلتر»: the least sources, «بدون آنچه زده‌ایم» and own topics
+  main.innerHTML = controlsHtml(
+    `<label>بازه <select id="hours">${[1, 3, 6, 12].map((h) => `<option value="${h}" ${h === prefs.topicHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>
+     <label>ترتیب <select id="tsort">${Object.entries(TOPIC_SORTS).map(([key, sort]) => `<option value="${key}" ${key === prefs.topicSort ? "selected" : ""}>${sort.name}</option>`).join("")}</select></label>
+     <input id="q" type="search" placeholder="جستجو در تیترها" aria-label="جستجو در تیترها" value="${esc(topicQuery)}" style="flex:1;min-width:100px" />`,
+    `<label>حداقل منبع <select id="min">${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
+     <label><input id="tours" type="checkbox" ${prefs.topicHideOurs ? "checked" : ""} /> بدون آنچه زده‌ایم</label>`,
+    (prefs.minSources !== 2 ? 1 : 0) + (prefs.topicHideOurs ? 1 : 0) + (prefs.topics.length ? 1 : 0))
+    + `<div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
+  wireControls();
   const bar = topicBar(prefs, () => show("topics"));
-  if (bar) main.querySelector(".controls").after(bar);
+  if (bar) document.getElementById("fpanel").append(bar);
   document.getElementById("hours").onchange = async (e) => { await saveNewsPrefs({ topicHours: +e.target.value }); show("topics"); };
   document.getElementById("min").onchange = async (e) => { await saveNewsPrefs({ minSources: +e.target.value }); show("topics"); };
-  let stories = null, now = null, note = "";
+  document.getElementById("tsort").onchange = async (e) => { await saveNewsPrefs({ topicSort: e.target.value }); show("topics"); };
+  document.getElementById("tours").onchange = async (e) => { await saveNewsPrefs({ topicHideOurs: e.target.checked }); show("topics"); };
+  let stories = null, now = null, note = "", hidden = "";
   const list = document.getElementById("list");
   // any part of any headline, folded as the filters (ی/ي, digits, half-spaces)
   const render = () => {
     const q = newsFold(topicQuery);
-    const shown = q ? stories.filter((s) => [s.title, ...s.items.map((i) => i.title)].some((t) => newsFold(t).includes(q))) : stories;
+    const shown = (q ? stories.filter((s) => [s.title, ...s.items.map((i) => i.title)].some((t) => newsFold(t).includes(q))) : [...stories])
+      .filter((s) => !prefs.topicHideOurs || !s.ours)
+      .sort((TOPIC_SORTS[prefs.topicSort] ?? TOPIC_SORTS.top).by);
     list.innerHTML = note + (shown.length ? shown.map((s) => storyCard(s, now)).join("")
-      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : `در این بازه سوژه‌ای با این تعداد منبع${prefs.topics.length ? " در موضوع‌های انتخاب‌شده" : ""} نیست.`}</div>`);
+      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : `در این بازه سوژه‌ای با این تعداد منبع${prefs.topics.length ? " در موضوع‌های انتخاب‌شده" : ""} نیست.`}</div>`) + hidden;
   };
   document.getElementById("q").oninput = (e) => { topicQuery = e.target.value; if (stories) render(); };
   const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
-  stories = await markFresh(newsPersonal(res.data.stories, prefs));
+  const personal = newsPersonal(res.data.stories, prefs);
+  stories = await markFresh(personal);
+  hidden = hiddenNote(res.data.teamHidden ?? 0, (res.data.stories ?? []).length - personal.length);
+  risingMinutes = res.data.risingMinutes ?? risingMinutes;
   now = res.data.now;
   note = staleNote(res.data);
   if (id === loadId) render();
 }
 
+// Why a story the user expects is not on the list: how many the team's filters (the server's count) and the user's own
+// (counted here) left out. Empty when neither hides anything.
+function hiddenNote(team, personal) {
+  const parts = [team > 0 ? `${fa(team)} سوژه با فیلتر تیم` : "", personal > 0 ? `${fa(personal)} سوژه با فیلتر شما` : ""].filter(Boolean);
+  return parts.length ? `<p class="muted hidden-note">${parts.join(" و ")} پنهان است. فیلترهای شما در ⚙ تنظیمات است${state?.access?.role === "owner"
+    ? `؛ <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=filters")}" target="_blank" rel="noopener">فیلترهای تیم در پنل</a>` : " و فیلترهای تیم را صاحب اشتراک در پنل تعیین می‌کند"}.</p>` : "";
+}
+
+// What a coverage gap needs, as three steps with what is done ticked: a site of the team, that site's feed, and its
+// competitors. All three are set in the panel by the subscription owner.
+function gapGuide(site) {
+  const owner = state?.access?.role === "owner";
+  const link = `<a class="btn" href="${safeUrl((state?.panelUrl ?? "") + "?tab=sites")}" target="_blank" rel="noopener">سایت و رقبا در پنل</a>`;
+  const step = (done, title, text) => `<li class="${done ? "done" : ""}"><b>${done ? "✓ " : ""}${title}</b><span class="muted">${text}</span></li>`;
+  return `<section class="card guide">
+    <h3>شکاف پوشش با سه قدم راه می‌افتد</h3>
+    <ol>
+      ${step(!!site, "سایت خود را انتخاب کنید", "از سایت‌هایی که در پنل جت‌سئو دارید.")}
+      ${step(!!site?.hasFeed, "فید سایت ثبت شود", "بدون فید سایت شما، معلوم نیست چه چیزی را منتشر کرده‌اید.")}
+      ${step(!!site?.competitors, "۵ تا ۱۰ رقیب هم‌حوزه انتخاب کنید", "سوژه‌ای که دست‌کم دو رقیب زده‌اند و شما نه، این‌جا می‌آید و هشدار می‌دهد.")}
+    </ol>
+    ${owner ? link : `<p class="muted">این سه مورد را صاحب اشتراک${state?.access?.ownerName ? ` (${esc(state.access.ownerName)})` : ""} در پنل جت‌سئو تنظیم می‌کند.</p>`}
+  </section>`;
+}
+
 async function showGap(id) {
   const sites = state?.sites ?? [];
-  const manage = `<a href="${safeUrl((state?.panelUrl ?? "") + "?tab=sites")}" target="_blank" rel="noopener">سایت و رقبا در پنل</a>`;
   if (!sites.length) {
-    main.innerHTML = `<div class="center"><p>هنوز سایتی برای شکاف پوشش انتخاب نشده است.</p><p class="muted">${state?.access?.role === "owner" ? manage : "صاحب اشتراک باید سایت و رقبا را در پنل جت‌سئو انتخاب کند."}</p></div>`;
+    main.innerHTML = gapGuide(null);
     return;
   }
   const prefs = await newsPrefs();
-  main.innerHTML = `<div class="controls">
-      ${sites.length > 1 ? `<select id="site" aria-label="سایت">${sites.map((s) => `<option value="${s.id}" ${s.id === gapSite ? "selected" : ""}>${esc(s.domain)}</option>`).join("")}</select>` : `<strong dir="ltr">${esc(sites[0].domain)}</strong>`}
-      <label>بازه <select id="ghours">${[3, 6, 12, 24].map((h) => `<option value="${h}" ${h === prefs.gapHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>
-    </div><div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
+  main.innerHTML = controlsHtml(
+    `${sites.length > 1 ? `<select id="site" aria-label="سایت">${sites.map((s) => `<option value="${s.id}" ${s.id === gapSite ? "selected" : ""}>${esc(s.domain)}</option>`).join("")}</select>` : `<strong dir="ltr">${esc(sites[0].domain)}</strong>`}
+     <label>بازه <select id="ghours">${[3, 6, 12, 24].map((h) => `<option value="${h}" ${h === prefs.gapHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>`)
+    + `<div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
   const siteSelect = document.getElementById("site");
   if (siteSelect) siteSelect.onchange = (e) => { gapSite = +e.target.value; show("gap"); };
   document.getElementById("ghours").onchange = async (e) => { await saveNewsPrefs({ gapHours: +e.target.value }); show("gap"); };
   const site = sites.find((s) => s.id === gapSite) ?? sites[0];
   const list = document.getElementById("list");
-  if (!site.hasFeed) { list.innerHTML = `<div class="empty">فید سایت شما ثبت نشده؛ بدون آن شکاف پوشش محاسبه نمی‌شود. ${state.access.role === "owner" ? manage : ""}</div>`; return; }
-  if (!site.competitors) { list.innerHTML = `<div class="empty">برای این سایت رقیبی انتخاب نشده است. ${state.access.role === "owner" ? manage : ""}</div>`; return; }
+  if (!site.hasFeed || !site.competitors) { list.innerHTML = gapGuide(site); return; }
   const res = await newsApi(`gap?siteId=${site.id}&hours=${prefs.gapHours}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
@@ -380,13 +593,139 @@ async function showGap(id) {
   const skipped = await newsSkipped();
   if (id !== loadId) return;
   const key = (s) => `${site.id}:${s.id}`;
+  risingMinutes = res.data.risingMinutes ?? risingMinutes;
   const stories = newsPersonal(res.data.stories, prefs).filter((s) => !skipped.has(key(s)));
   list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minCompetitors)} رقیب از ${fa(res.data.competitors)} رقیب شما کار کرده‌اند و ${esc(res.data.site)} نه.</p>` +
-    (stories.length ? stories.map((s) => storyCard(s, res.data.now, `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>
-      <button class="btn ghost small" type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ دیگر نه نشان داده شود نه هشدار">رد شد</button>`)).join("")
-      : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
+    (stories.length ? stories.map((s) => storyCard(s, res.data.now, {
+      meta: `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>`,
+      menu: `<button type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ برای همه تیم پنهان می‌شود و هشدار نمی‌دهد">رد شد</button>`,
+    })).join("") : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
   chrome.runtime.sendMessage({ type: "news-gap-seen", ids: stories.map((s) => `${site.id}:${s.id}`) }).catch(() => {});
-  document.getElementById("gap-count").hidden = true;
+}
+
+// «رسانه‌های خارجی»: stories several foreign (English) sources told, with the Persian headlines the server found for them,
+// if any (api/News/foreign). The headlines are English and left to right; everything around them is Persian, like the
+// rest of the app. JetSEO translates nothing: each headline links to its article and to Google Translate's page of it.
+const translateUrl = (u) => (/^https?:\/\//i.test(String(u ?? "")) ? `https://translate.google.com/translate?sl=auto&tl=fa&u=${encodeURIComponent(u)}` : "#");
+const CATEGORY_FA = { general: "خبر عمومی و جهان", agency: "خبرگزاری‌ها", economy: "اقتصاد و کریپتو", tech: "فناوری", science: "علم", health: "سلامت", auto: "خودرو", sport: "ورزش", culture: "فرهنگ و بازی" };
+
+// s.covers: Persian headlines that hold the story's Latin names («GPT», «OpenAI»); s.ours: the same on the team's own
+// sites. The server finds only those: a story without one may still be told in Persian with every name in Persian
+// letters, so no card says «پوشش داده نشده». s.recent: sources that joined in the last risingHours; s.watch: a watched
+// word (the team's, or the user's own: newsGlobal); s.key: its names, for «زاویه‌ها»; s.mark: the team's mark.
+function globalCard(s, now, risingHours) {
+  const items = s.items ?? [];
+  const covers = s.covers ?? [];
+  const ours = s.ours ?? [];
+  const first = items[0];
+  const dismissed = s.mark?.status === "dismissed";
+  const translate = (url) => `<a href="${esc(translateUrl(url))}" target="_blank" rel="noopener" title="صفحه ترجمه فارسی این خبر در گوگل ترنسلیت">ترجمه</a>`;
+  const headlines = items.map((i) => `<li><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a>
+      <span class="muted" dir="rtl"><bdi>${esc(i.source)}</bdi> · ${ago(i.at, now)} · ${translate(i.url)}</span></li>`).join("");
+  const persian = (list) => list.map((c) => `<li><a href="${safeUrl(c.url)}" target="_blank" rel="noopener">${esc(c.title)}</a> <span class="muted">${esc(c.source)}</span></li>`).join("");
+  return cardShell({
+    title: s.title, url: first?.url, ltr: true, className: dismissed ? "dismissed" : "",
+    count: `<span class="badge"${s.core ? ` title="${fa(s.core)} تا از این منابع، رسانه‌های اصلی‌اند"` : ""}>${fa(s.sources)} منبع${s.core ? ` · ${fa(s.core)} اصلی` : ""}</span>`,
+    badges: [
+      takenBadge(s, now),
+      dismissed ? `<span class="badge">رد شده: ${esc(s.mark.by || "یکی از اعضا")} · ${ago(s.mark.at, now)}</span>` : "",
+      s.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : "",
+      ours.length ? `<span class="badge ok" title="نام‌های لاتین این سوژه در تیتر یکی از سایت‌های تیم هست">در سایت شما</span>`
+        : covers.length ? `<span class="badge ok" title="نام‌های لاتین این سوژه در تیتر یک رسانه فارسی هست">در رسانه فارسی دیده شد</span>` : "",
+      s.recent >= 2 ? `<span class="badge new" title="منابعی که در ${fa(risingHours)} ساعت اخیر این سوژه را زده‌اند">${fa(s.recent)} منبع تازه</span>` : "",
+    ],
+    meta: first ? `<span>اولین: <bdi>${esc(first.source)}</bdi> · ${ago(s.firstAt, now)}</span> ${translate(first.url)}` : "",
+    main: takeButton(s),
+    menu: [
+      s.key ? `<button type="button" data-gangles="${esc(s.key)}" title="آنچه مخاطب ایرانی همراه نام‌های این سوژه جستجو می‌کند">زاویه‌ها</button>` : "",
+      `<button type="button" data-mark="${dismissed ? "none" : "dismissed"}" data-story="${esc(s.id)}" title="${dismissed ? "سوژه دوباره برای همه تیم نمایش داده می‌شود" : "سوژه برای همه اعضای تیم پنهان می‌شود"}">${dismissed ? "برگرداندن برای تیم" : "رد برای تیم"}</button>`,
+    ],
+    details: `<div class="sub">تیترها (${fa(items.length)})</div><ul dir="ltr" lang="en">${headlines}</ul>
+      ${ours.length ? `<div class="sub">در سایت شما (${fa(ours.length)})</div><ul lang="fa">${persian(ours)}</ul>` : ""}
+      ${covers.length ? `<div class="sub">تیترهای فارسی پیداشده (${fa(covers.length)})</div><ul lang="fa">${persian(covers)}</ul>` : ""}`,
+  });
+}
+
+// «زاویه‌ها» of a foreign story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
+// fewer of them until Google knows the phrase. On the click only, like the Persian stories' «زاویه‌ها».
+main.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-gangles]");
+  if (!b) return;
+  // in the click's user gesture, before anything is awaited; true at once when already granted
+  const allowed = chrome.permissions.request({ origins: [SUGGEST_ORIGIN] }).catch(() => false);
+  const out = b.closest(".card").querySelector(".angles");
+  b.disabled = true;
+  if (!(await allowed)) {
+    b.disabled = false;
+    out.innerHTML = `<div class="muted">زاویه‌ها از جستجوی گوگل خوانده می‌شوند؛ بدون اجازه دسترسی به آن نشان داده نمی‌شوند.</div>`;
+    return;
+  }
+  const words = b.dataset.gangles.split(/\s+/).filter(Boolean);
+  let q = "", angles = [];
+  for (q of new Set([words.length, 2, 1].map((n) => words.slice(0, n).join(" ")))) {
+    angles = await suggestions(q);
+    if (angles.length) break;
+  }
+  newsUsed("angles", globalCategory);
+  out.innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای نام‌های این سوژه زاویه‌ای پیشنهاد نمی‌دهد.</div>`;
+  b.hidden = true;
+});
+
+// «بیشترین منبع» is the server's order (a core outlet weighs double). «رو به رشد»: the stories most sources picked up
+// in the last hours. «همه»: also the stories one source alone told (min 1), for the fields whose sites seldom tell the
+// same story (science, health).
+const GLOBAL_SORTS = {
+  top: { name: "بیشترین منبع", by: () => 0 },
+  rising: { name: "رو به رشد", by: (a, b) => b.recent - a.recent },
+  newest: { name: "تازه‌ترین", by: (a, b) => Date.parse(b.firstAt) - Date.parse(a.firstAt) },
+  all: { name: "همه، حتی تک‌منبعی", by: () => 0, min: 1 },
+};
+// until the panel closes: a look at what the team set aside, not a setting
+let globalShowDismissed = false;
+
+async function showGlobal(id) {
+  if (!state?.foreignNews) {
+    main.innerHTML = `<div class="center">
+      <p><strong>رسانه‌های خارجی</strong></p>
+      <p>سوژه‌هایی که رسانه‌های خارجی همین حالا کار می‌کنند، پیش از آن‌که به رسانه‌های فارسی برسند؛ هرکدام با لینک خبر و ترجمه فارسی آن.</p>
+      <p class="muted">این بخش در اشتراک فعلی جت‌سئو نیوز شما نیست. ${state?.access?.role === "owner" ? `<a href="${safeUrl(state?.panelUrl)}" target="_blank" rel="noopener">دیدن پله‌های اشتراک</a>` : "از صاحب اشتراک بخواهید آن را ارتقا دهد."}</p>
+    </div>`;
+    return;
+  }
+  const prefs = await newsPrefs();
+  const categories = state.foreignCategories ?? [];
+  const category = categories.includes(prefs.globalCategory) ? prefs.globalCategory : "";
+  const sort = GLOBAL_SORTS[prefs.globalSort] ?? GLOBAL_SORTS.top;
+  const select = (idName, options, current) => `<select id="${idName}">${options.map(([value, name]) => `<option value="${esc(value)}" ${String(value) === String(current) ? "selected" : ""}>${esc(name)}</option>`).join("")}</select>`;
+  main.innerHTML = `<div class="global">` + controlsHtml(
+    `<label>بازه ${select("glhours", [6, 24, 72].map((h) => [h, `${fa(h)} ساعت`]), prefs.globalHours)}</label>
+     <label>ترتیب ${select("glsort", Object.entries(GLOBAL_SORTS).map(([key, x]) => [key, x.name]), prefs.globalSort)}</label>`,
+    `${categories.length > 1 ? `<label>حوزه ${select("glcat", [["", "همه"], ...categories.map((c) => [c, CATEGORY_FA[c] ?? c])], category)}</label>` : ""}
+     <label><input id="glseen" type="checkbox" ${prefs.globalHideSeen ? "checked" : ""} /> بدون آنچه در رسانه فارسی دیده شده</label>
+     <label><input id="gldismissed" type="checkbox" ${globalShowDismissed ? "checked" : ""} /> نمایش ردشده‌های تیم</label>`,
+    (category ? 1 : 0) + (prefs.globalHideSeen ? 1 : 0) + (globalShowDismissed ? 1 : 0)) +
+    `<div id="list"><div class="empty">در حال بارگذاری…</div></div></div>`;
+  wireControls();
+  document.getElementById("glhours").onchange = async (e) => { await saveNewsPrefs({ globalHours: +e.target.value }); show("global"); };
+  document.getElementById("glsort").onchange = async (e) => { await saveNewsPrefs({ globalSort: e.target.value }); show("global"); };
+  document.getElementById("gldismissed").onchange = (e) => { globalShowDismissed = e.target.checked; show("global"); };
+  document.getElementById("glseen").onchange = async (e) => { await saveNewsPrefs({ globalHideSeen: e.target.checked }); show("global"); };
+  const cat = document.getElementById("glcat");
+  if (cat) cat.onchange = async (e) => { await saveNewsPrefs({ globalCategory: e.target.value }); show("global"); };
+  const list = document.getElementById("list");
+  const res = await newsApi(`foreign?hours=${prefs.globalHours}${category ? `&category=${encodeURIComponent(category)}` : ""}${sort.min ? `&minSources=${sort.min}` : ""}`);
+  if (id !== loadId) return;
+  if (res.status === 403) return start();
+  if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
+  globalCategory = category;
+  countOnce("global-open", category);
+  const all = newsGlobal(res.data.stories, prefs, globalShowDismissed);
+  // the server's order is «بیشترین منبع»; a sort that leaves two stories equal keeps it between them
+  const stories = (prefs.globalHideSeen ? all.filter((s) => !s.covers?.length && !s.ours?.length) : all).sort(sort.by);
+  list.innerHTML = staleNote(res.data) +
+    `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minSources)} رسانه خارجی گفته‌اند. «در رسانه فارسی دیده شد» یعنی نام‌های لاتین سوژه (شرکت، محصول) در تیتر یک رسانه فارسی هست؛ سوژه بدون این برچسب هم ممکن است به فارسی کار شده باشد، پس پیش از نوشتن بررسی کنید.</p>` +
+    (stories.length ? stories.map((s) => globalCard(s, res.data.now, res.data.risingHours)).join("")
+      : `<div class="empty">${all.length ? "همه سوژه‌های این بازه در رسانه‌های فارسی دیده شده‌اند." : "در این بازه سوژه‌ای با این تعداد منبع نیست."}</div>`);
 }
 
 // «۲ ساعت و ۵ دقیقه»
@@ -536,9 +875,9 @@ function modeBar(modes, current, pick, extra = "") {
 }
 
 // The suggestions as links, each without base, the phrase they were asked for: «گنو پتریاشویلی خداحافظی» → «خداحافظی»
-function angleChips(angles, base) {
+function angleChips(angles, base, heading = "زاویه‌ها (مخاطب این‌ها را هم جستجو می‌کند)") {
   const short = (s) => s.replace(base, "").trim() || s;
-  return `<div class="sub">زاویه‌ها (مخاطب این‌ها را هم جستجو می‌کند)</div><div class="chips">${angles.map((s) =>
+  return `<div class="sub">${heading}</div><div class="chips">${angles.map((s) =>
     `<a class="chip" href="https://www.google.com/search?q=${encodeURIComponent(s)}&hl=fa" target="_blank" rel="noopener" title="${esc(s)}">${esc(short(s))}</a>`).join("")}</div>`;
 }
 
@@ -584,13 +923,26 @@ const newsUrl = (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}
 const newsLink = (q) => `<a href="${newsUrl(q)}" target="_blank" rel="noopener">چرا؟ خبرها</a>`;
 
 async function showWiki(id) {
-  const modes = { rising: "رو به رشد", top: "پربازدیدترین", edits: "ویرایش داغ" };
+  const modes = { rising: "رو به رشد", top: "پربازدیدترین", edits: "ویرایش داغ", missing: "انگلیسی، بدون فارسی" };
   const mode = wikiMode;
   modeBar(modes, mode, (v) => { wikiMode = v; show("wiki"); });
   const list = document.getElementById("list");
   const data = await freeApi(id, `wiki?mode=${mode}`, "آمار ویکی‌پدیا", list);
   if (!data) return;
-  if (mode === "edits") {
+  if (mode === "missing") {
+    countOnce("wiki-missing");
+    // English Wikipedia's most-read articles with no Persian one: what the world reads about and Persian has not caught up with
+    const items = data.items ?? [];
+    const date = new Date(data.day).toLocaleDateString("fa-IR", { timeZone: "UTC" });
+    const enLink = (article) => `https://en.wikipedia.org/wiki/${encodeURIComponent(article)}`;
+    list.innerHTML = `<p class="muted">پربازدیدترین مقاله‌های ویکی‌پدیای انگلیسی در ${esc(date)} که مقاله فارسی ندارند: فیلم، آدم یا رویدادی که دنیا درباره‌اش می‌خواند و هنوز به فارسی نیامده است.</p>` +
+      (items.length ? items.map((a) => `<article class="card">
+      <h3 dir="ltr" lang="en" style="text-align:left"><a href="${enLink(a.article)}" target="_blank" rel="noopener">${esc(a.article.replace(/_/g, " "))}</a></h3>
+      <div class="meta"><span class="badge">${fa(a.views)} بازدید</span>
+        <a href="${esc(translateUrl(enLink(a.article)))}" target="_blank" rel="noopener">ترجمه مقاله</a>
+        ${newsLink(a.article.replace(/_/g, " "))}</div>
+    </article>`).join("") : `<div class="empty">همه مقاله‌های پربازدید انگلیسی این روز، مقاله فارسی دارند.</div>`);
+  } else if (mode === "edits") {
     const edits = data.edits ?? [];
     list.innerHTML = `<p class="muted">مقاله‌هایی از ویکی‌پدیای فارسی که در ۳ ساعت اخیر چند نفر ویرایششان کرده‌اند (بدون ربات‌ها).</p>` +
       (edits.length ? edits.map((p) => `<article class="card">
@@ -731,7 +1083,7 @@ async function showMedia(id) {
   const rows = (media) => `<ul class="list">${media.map((i) => `<li><span class="badge media">${MEDIA_KINDS[i.kind]}</span>
     <a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a> <span class="muted">${esc(i.source)} · ${ago(i.at, now)}</span></li>`).join("")}</ul>`;
   list.innerHTML = `<p class="muted">سوژه‌هایی که رسانه‌ها برایشان ویدئو، عکس، اینفوگرافیک یا صوت منتشر کرده‌اند (از روی تیتر و آدرس هر مطلب).</p>` +
-    (made.length ? made.map((s) => storyCard(s, now, badges(s.media), rows(s.media))).join("") : `<div class="empty">در این بازه مطلب چندرسانه‌ای پیدا نشد.</div>`);
+    (made.length ? made.map((s) => storyCard(s, now, { meta: badges(s.media), body: rows(s.media) })).join("") : `<div class="empty">در این بازه مطلب چندرسانه‌ای پیدا نشد.</div>`);
 }
 
 // «کپی برای پیام‌رسان»: a story as plain text for the team's Telegram or Bale group.
@@ -787,6 +1139,10 @@ main.addEventListener("click", async (e) => {
   if (!b) return;
   const card = b.closest(".card");
   const key = b.dataset.skip;
+  // for the whole team too (api/News/mark; key = «site:story»): its other members stop seeing and being alerted of the
+  // story. Not waited for: the local skip below already holds here, also with a server that has no marks yet.
+  const mark = (status) => newsApi(`mark?storyId=${encodeURIComponent(key.split(":")[1])}&status=${status}`, "POST");
+  mark("dismissed");
   await newsSetSkipped(key, true);
   card.hidden = true;
   const undo = document.createElement("div");
@@ -794,6 +1150,7 @@ main.addEventListener("click", async (e) => {
   undo.innerHTML = `«${esc(card.querySelector("h3").textContent)}» کنار گذاشته شد. <a href="#">برگردان</a>`;
   undo.querySelector("a").onclick = async (ev) => {
     ev.preventDefault();
+    mark("none");
     await newsSetSkipped(key, false);
     undo.remove();
     card.hidden = false;
@@ -803,6 +1160,33 @@ main.addEventListener("click", async (e) => {
   undo.querySelector("a").focus();
 });
 
+// «چه چیزی تازه است»: once after an update, what the new version added, until «فهمیدم». Shown to someone who used an
+// earlier version (the background has run before: newsSeen), not on a first install.
+const WHATS_NEW = {
+  "0.8.0": [
+    "بخش‌ها چهار تا شدند: امروز، سوژه‌ها، ترندها و سایت ما. فهرست‌های هر بخش زیر آن است و تنظیمات به ⚙ بالای صفحه رفت.",
+    "«رسانه‌های خارجی» در بخش سوژه‌ها: سوژه‌های داغ رسانه‌های انگلیسی‌زبان، با لینک خبر و ترجمه گوگل.",
+    "«برداشتم» روی هر سوژه به تیم می‌گوید شما روی آن کار می‌کنید؛ «رد شد» برای همه تیم اعمال می‌شود.",
+    "برچسب‌های «در سایت شما» و «منبع تازه»، و ترتیب «رو به رشد». کارهای دیگر هر سوژه (زاویه‌ها، کپی) زیر «⋯» است.",
+    "فهرست‌هایی که لازم ندارید را در ⚙ تنظیمات بردارید.",
+  ],
+};
+async function showWhatsNew() {
+  const box = document.getElementById("whatsnew");
+  const version = chrome.runtime.getManifest().version;
+  const { newsVersionSeen, newsSeen } = await chrome.storage.local.get(["newsVersionSeen", "newsSeen"]).catch(() => ({}));
+  const seen = () => chrome.storage.local.set({ newsVersionSeen: version }).catch(() => {});
+  if (newsVersionSeen === version || !WHATS_NEW[version] || (!newsVersionSeen && !newsSeen?.started)) {
+    box.hidden = true;
+    if (newsVersionSeen !== version) seen();
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `<strong>در این نسخه (${esc(version)}) چه چیزی تازه است</strong><ul>${WHATS_NEW[version].map((line) => `<li>${esc(line)}</li>`).join("")}</ul>
+    <button class="btn ghost small" type="button" id="whatsnew-ok">فهمیدم</button>`;
+  document.getElementById("whatsnew-ok").onclick = () => { box.hidden = true; seen(); };
+}
+
 async function showSettings() {
   const prefs = await newsPrefs();
   const owner = state?.access?.role === "owner";
@@ -811,13 +1195,19 @@ async function showSettings() {
       <p class="muted" style="margin:0">فقط برای خودتان. فیلترهای تیم (برای همه اعضا) در پنل جت‌سئو هستند${owner ? `: <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=filters")}" target="_blank" rel="noopener">فیلترهای تیم</a>` : ""}.</p>
       <label for="excluded">کلمات مستثنی (با ویرگول جدا شوند؛ فقط کلمه کامل)</label>
       <textarea id="excluded">${esc(prefs.excluded.join("، "))}</textarea>
-      <label for="watch">کلیدواژه‌های تحت نظر من (با ویرگول؛ فقط کلمه کامل). کنار کلیدواژه‌های تیم، برچسب و هشدار می‌گیرند.</label>
+      <label for="watch">کلیدواژه‌های تحت نظر من (با ویرگول؛ فقط کلمه کامل). کنار کلیدواژه‌های تیم، برچسب و هشدار می‌گیرند. کلمه لاتین (مثل <span dir="ltr">OpenAI</span>) در سوژه‌های خارجی تب <span dir="ltr">Global</span> هم هشدار می‌دهد.</label>
       <textarea id="watch">${esc(prefs.watch.join("، "))}</textarea>
       <label for="muted">منابع بی‌صدا (دامنه، با ویرگول)</label>
       <textarea id="muted" dir="ltr">${esc(prefs.muted.join(", "))}</textarea>
       ${offeredTopics().length > 1 ? `<fieldset class="topics-pick"><legend>موضوع‌های من (میز شما در تحریریه؛ هیچ = همه${state.teamTopics?.length ? " موضوع‌های تیم" : ""})</legend>
         ${offeredTopics().map((t) => `<label class="row"><input type="checkbox" name="topic" value="${esc(t.key)}" ${prefs.topics.includes(t.key) ? "checked" : ""}/> ${esc(t.name)}</label>`).join("")}
         <p class="muted" style="margin:0">سوژه‌ای با کلیدواژه تحت نظر، از هر موضوعی باشد، نمایش داده می‌شود و هشدار می‌دهد.</p></fieldset>` : ""}
+    </section>
+    <section class="card">
+      <h3>فهرست‌ها</h3>
+      <p class="muted" style="margin:0">فهرست‌هایی که به کارتان نمی‌آید را بردارید تا بالای صفحه خلوت شود. داشبورد همیشه هست.</p>
+      <div class="picks">${Object.keys(TAB_NAMES).filter((t) => t !== "dash" && (state?.access || FREE_TABS.includes(t)) && (t !== "global" || "foreignNews" in (state ?? {})))
+        .map((t) => `<label class="row"><input type="checkbox" name="showtab" value="${t}" ${prefs.hiddenTabs.includes(t) ? "" : "checked"}/> ${TAB_NAMES[t]}</label>`).join("")}</div>
     </section>
     <section class="card">
       <h3>هشدارها</h3>
@@ -846,7 +1236,10 @@ async function showSettings() {
       ...(offeredTopics().length > 1 ? { topics: [...document.querySelectorAll("input[name=topic]:checked")].map((c) => c.value) } : {}),
       notifyGap: document.getElementById("notifyGap").checked,
       notifyWatch: document.getElementById("notifyWatch").checked,
+      hiddenTabs: [...document.querySelectorAll("input[name=showtab]:not(:checked)")].map((c) => c.value),
     });
+    hiddenTabs = (await newsPrefs()).hiddenTabs;
+    renderNav();
     document.getElementById("saved").hidden = false;
   };
 }
@@ -860,9 +1253,8 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // the gap count from the background's last round, until the tab is opened
 chrome.action.getBadgeText({}).then((text) => {
-  const count = document.getElementById("gap-count");
-  count.hidden = !text;
-  count.textContent = text ? fa(text) : "";
+  gapBadge = tab === "gap" ? 0 : parseInt(text, 10) || 0;
+  renderNav();
 });
 
 start();
