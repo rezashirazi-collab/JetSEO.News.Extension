@@ -1,11 +1,15 @@
 # جت‌سئو نیوز (JetSEO News)
 
-A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel (or a full page) with a dashboard and these tabs:
+A Chrome extension for news editors and journalists, by [JetSEO](https://www.jetseo.ir). A side panel (or a full page) in four sections: «امروز» (the dashboard), «سوژه‌ها» (hot stories, the coverage gap, Telegram, multimedia, foreign media), «ترندها» (Google, Wikipedia, occasions) and «سایت ما» (our articles); the open section's lists are in a second row, and «تنظیمات» is the ⚙ in the header. The lists:
 - **سوژه‌های داغ:** stories that several Iranian news sites are telling right now. Each shows how many Telegram channels told it too, «اول در تلگرام» when a channel was ahead of the sites, and a «ترند» badge when it matches a Google or Wikipedia trend. «کپی» copies it (headline and source links) for the team's Telegram or Bale group.
 - **شکاف پوشش:** stories your competitors published and your site did not.
-- **Global:** stories several international (English) sources are telling. A story is marked «Seen in Persian media» when a Persian headline holds its Latin names («GPT», «OpenAI»); a story without the mark may still be told in Persian with every name in Persian letters. The one English, left-to-right tab. JetSEO translates nothing and asks no language model: every headline has «Read» (the article) and «Translate» (Google Translate's Persian page of that article, in a new tab). Only for tiers with «خبر خارجی» (the admin sets it per tier); other subscribers see what the tab is and the link to the plans.
-  - On each story: «On your site» when one of the team's own sites has it, «+3 in 3h» when sources are picking it up now (and a «Rising» sort), «Watched keyword» for the team's or your own watched words (a Latin word such as `OpenAI` matches the English headlines), «Angles» (what readers in Iran search along with the story's names, from Google's autocomplete), and «Take» / «Dismiss», which mark the story for the whole team: a taken story shows who is writing it, a dismissed one is hidden for everyone until «Show dismissed».
-  - A watched word in a new foreign story is notified like the Persian ones; the dashboard has a tile and a list for the tab.
+- **رسانه‌های خارجی:** stories several international (English) sources are telling. A story is marked «در رسانه فارسی دیده شد» when a Persian headline holds its Latin names («GPT», «OpenAI»); a story without the mark may still be told in Persian with every name in Persian letters. The headlines are English and left to right; everything around them is Persian. JetSEO translates nothing and asks no language model: every headline links to its article and has «ترجمه» (Google Translate's Persian page of that article, in a new tab). Only for tiers with «خبر خارجی» (the admin sets it per tier); other subscribers see what the tab is and the link to the plans.
+  - On each story: «در سایت شما» when one of the team's own sites has it, «N منبع تازه» when sources are picking it up now (and the order «رو به رشد»), «کلیدواژه تحت نظر» for the team's or your own watched words (a Latin word such as `OpenAI` matches the English headlines), «زاویه‌ها» (what readers in Iran search along with the story's names, from Google's autocomplete), and «برداشتم» / «رد برای تیم», which mark the story for the whole team: a taken story shows who is writing it, a dismissed one is hidden for everyone until «نمایش ردشده‌های تیم». The order «همه، حتی تک‌منبعی» also lists what one source alone told (science and health sites seldom tell the same story).
+  - A watched word in a new foreign story is notified like the Persian ones.
+- **Every story card** reads the same way: the headline opens the first source's article; the count of sources and at most two badges are in sight, the rest under «جزئیات» with the headlines; one main button («برداشتم») and the other actions (زاویه‌ها، کپی، رد شد) under «⋯».
+- **Every list** shows its period and order; its other choices are behind «فیلتر», whose number says how many are on. Under the hot stories a line says how many stories the team's filters and your own left out.
+- **«جا مانده‌ها»** on the dashboard puts the three «what did I miss» numbers together: what the competitors told, what the foreign media told, and what only Telegram channels told.
+- In «تنظیمات» (⚙) the lists you do not use can be switched off. After an update, «چه چیزی تازه است» says once what changed.
 - **تلگرام:** stories only Telegram channels have told so far (no site yet), or the posts spreading fastest for their channel.
 - **چندرسانه‌ای:** for a multimedia desk, from the hot stories: those other sites made a video, photos, an infographic or audio for («کار شده»), and those at least 3 sites told with none yet («فرصت»). The server keeps no media type, so it is read from the headline's marker («فیلم/ …», «… + تصاویر») or the URL's section (`/video/`, `/photo/`, `/media/`); a headline without one is missed.
 - **مطالب ما:** your site's articles of the last 24 hours, how many minutes after the first competitor each came out, «مقایسه تیتر» (the headlines other sites gave the same story, from the `topics` endpoint, and the words most of them use and yours does not), and a news SEO check of any of them (title, description, H1, canonical, robots, the image Discover needs, NewsArticle data, publish time, language).
@@ -20,7 +24,9 @@ Also:
 - Hot stories not on the list the last time it was in sight are marked «جدید»; a search box filters the headlines.
 - Every story has a topic badge (سیاسی، ورزشی، …, decided on the server from the feeds' sections and the headline). Chips over the hot stories, or «موضوع‌های من» in «تنظیمات», keep only your own desk's topics, out of the team's «حوزه خبری» set in the panel; a story with a watched keyword stays whatever its topic.
 - «زاویه‌ها» on a story asks Google's autocomplete what readers search with it, and adds that to its «کپی».
-- «رد شد» on a coverage gap hides that story from the list and the alerts.
+- «رد شد» on a coverage gap hides that story from the list and the alerts, for the whole team.
+- «برداشتم» on a story tells the team you are writing it: every member sees «برداشته: نام» on it; «آزاد شد» frees it.
+- A story one of the team's own sites already tells is marked «در سایت شما» (and «بدون آنچه زده‌ایم» over the hot stories leaves those out); «N منبع تازه» marks a story several sites picked up in the last hour, and «ترتیب: رو به رشد» puts those first.
 - Right-click a page of one of the team's sites, or a link to one: «بررسی سئوی این خبر» opens «مطالب ما» with its news SEO check.
 - Alt+Shift+N opens the extension (changeable in `chrome://extensions/shortcuts`).
 
@@ -57,10 +63,11 @@ Chrome 116 or later.
   - `check?url=`: news SEO check of one article, for the team's own sites only.
   - `telegram?mode=only|trend&hours=`: stories only channels told, or the fastest-spreading posts.
   - `foreign?hours=&category=`: international stories, each with `covers`: the Persian headlines found for it, if any. 403 `{reason: "no-foreign"}` when the tier does not include it; `state.foreignNews` says so beforehand, and a server without that field hides the tab.
-  - `POST foreign/mark?storyId=&status=taken|dismissed|none`: the team's mark on a foreign story.
+  - `POST mark?storyId=&status=taken|dismissed|none`: the team's mark on a story: «Take» and «Dismiss» in «Global», «رد شد» on a coverage gap (held for the whole team).
   - Free, signed in only: `google`, `wiki?mode=rising|top|edits|missing`, `days?offset=0..2`.
   - A 401 means signed out; the extension forgets the token. A 403 `{reason: "no-module"}` means no subscription; only Google Trends, Wikipedia trends and the occasions stay.
 - **Google's autocomplete** (`suggestqueries.google.com`, the «زاویه‌ها»): read directly, since Google Search is not filtered in Iran. An optional host permission, asked on the first «زاویه‌ها» click: a new required one would disable the extension on update until each user approves it.
+- **Use counts:** `POST used?what=&category=` tells JetSEO that the «Global» list was opened (once a half hour), a foreign article was opened or sent to Google Translate, «Angles» was asked, or «انگلیسی، بدون فارسی» was opened; and for the Persian module tabs, that a tab was opened (once a half hour each) or a headline was opened from one. Only the action and the list's category are sent, never the story or its address. JetSEO's admins see the totals of each team.
 - **Nothing else.** Google Trends, Wikipedia and Telegram are filtered in Iran, so the extension never reads them itself: CoreApi and JetSEO's news loop read them through ai.jetseo.ir (design doc 11-7 in the JetSEO repository).
 
 ## Release

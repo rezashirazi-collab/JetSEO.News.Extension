@@ -67,6 +67,12 @@ async function newsApi(path, method = "GET") {
   }
 }
 
+// Counts one use of the foreign stories for JetSEO's own report (api/News/used: opening the list, reading or translating
+// an article, the angles; only the action and the category, never the story). Not waited for: a count that fails is lost.
+function newsUsed(what, category = "") {
+  newsApi(`used?what=${encodeURIComponent(what)}${category ? `&category=${encodeURIComponent(category)}` : ""}`, "POST");
+}
+
 // How the toolbar icon opens the app: "tab", a full page (the default), or "panel", Chrome's side panel.
 async function newsView() {
   const { newsView: view } = await chrome.storage.sync.get("newsView").catch(() => ({}));
@@ -97,6 +103,8 @@ async function newsPrefs() {
     notifyGap: prefs.notifyGap ?? true,
     notifyWatch: prefs.notifyWatch ?? true,
     topicHours: prefs.topicHours ?? 3,
+    topicSort: prefs.topicSort ?? "top",
+    topicHideOurs: prefs.topicHideOurs ?? false,
     minSources: prefs.minSources ?? 2,
     gapHours: prefs.gapHours ?? 6,
     telegramHours: prefs.telegramHours ?? 6,
@@ -104,8 +112,8 @@ async function newsPrefs() {
     globalHours: prefs.globalHours ?? 24,
     globalCategory: prefs.globalCategory ?? "",
     globalSort: prefs.globalSort ?? "top",
-    // 0 = the server's own (News.ForeignMinSources)
-    globalMinSources: prefs.globalMinSources ?? 0,
+    // lists the user switched off in «تنظیمات» (panel.js TAB_NAMES keys)
+    hiddenTabs: prefs.hiddenTabs ?? [],
     // off by default: «seen in Persian media» is a match on Latin names only, too weak to hide a story unasked
     globalHideSeen: prefs.globalHideSeen ?? false,
   };
