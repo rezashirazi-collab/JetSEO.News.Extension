@@ -3,7 +3,7 @@
 // POST /extension/token, sent with the site's cookie, then gives this browser a token (the site accepts only
 // this extension's id, fixed by the manifest key). CoreApi's api/News endpoints take it in X-JetSEO-User:
 // 401 = signed out or revoked, 403 {reason: "no-module"} = no subscription (the free part still works).
-// Function declarations only: the background loads this with importScripts, the panel with a script tag.
+// Plain declarations at the top level (no modules): the background loads this with importScripts, the panel with a script tag.
 
 var NEWS_SITE = "https://www.jetseo.ir";
 var NEWS_API = "https://coreapi.jetseo.ir/api/News";

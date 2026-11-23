@@ -67,6 +67,13 @@ function staleNote(data) {
     خواندن خبرها در سرور جت‌سئو متوقف شده و خالی بودن فهرست به معنی نبودن سوژه نیست. لطفاً به پشتیبانی خبر دهید.</div>`;
 }
 
+// Signed out, or no state: the export of the last list, the «فقط کلیدواژه‌های من» line and the height held for a redraw go.
+function clearList() {
+  setExport(null);
+  focusBox.hidden = true;
+  main.style.minHeight = "";
+}
+
 function setBanner(html, bad = false) {
   banner.hidden = !html;
   banner.className = bad ? "bad" : "";
@@ -76,12 +83,14 @@ function setBanner(html, bad = false) {
 async function start() {
   const account = await newsAccount();
   if (!account) return signedOut();
-  main.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
+  // ⟳ over a list: it stays in sight while the state loads, so show() can keep its place
+  if (!main.querySelector(".card")) main.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
   const res = await newsApi("state");
   if (res.status === 401) return signedOut();
   if (res.status !== 200) {
     state = null;
     renderNav();
+    clearList();
     main.innerHTML = `<div class="center"><p>اتصال به جت‌سئو برقرار نشد.</p><button class="btn ghost" id="retry" type="button">دوباره</button></div>`;
     document.getElementById("retry").onclick = start;
     return;
@@ -138,6 +147,7 @@ async function takeGo() {
 function signedOut() {
   state = null;
   renderNav();
+  clearList();
   who.textContent = "";
   setBanner(null);
   main.innerHTML = `<div class="center">
@@ -200,7 +210,7 @@ function show(name) {
   // The same list drawn again («من می‌نویسم», a filter, ⟳, the 3-minute refresh): it stays where the user was reading,
   // with the «جزئیات» they had opened. main keeps its height while the list loads, so the page does not jump to the top.
   const keep = name === tab && name !== "settings" && main.querySelector(".card")
-    ? { y: window.scrollY, open: new Set([...main.querySelectorAll("details.more[open]")].map((d) => d.closest(".card")?.querySelector("h3")?.textContent)) }
+    ? { open: new Set([...main.querySelectorAll("details.more[open]")].map((d) => d.closest(".card")?.querySelector("h3")?.textContent)) }
     : null;
   main.style.minHeight = keep ? `${main.offsetHeight}px` : "";
   tab = name;
@@ -219,13 +229,14 @@ function show(name) {
     if (id !== loadId) return;
     for (const d of main.querySelectorAll("details.more")) if (keep.open.has(d.closest(".card")?.querySelector("h3")?.textContent)) d.open = true;
     main.style.minHeight = "";
-    window.scrollTo(0, keep.y);
   });
 }
 
 // «فقط کلیدواژه‌های من» (prefs.watchOnly, set in «تنظیمات»): the story lists keep only the stories with a watched word
 // (api.js newsFocused). Over each of those lists a line says so, with the words and the way back: a list that is short
 // or empty for no reason in sight reads as «no news».
+// an empty list while it is on is empty because of the words, whatever the list's own reason would be
+const emptyText = (prefs, text) => (newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست." : text);
 const FOCUS_TABS = ["dash", "topics", "gap", "telegram", "media", "global"];
 const focusBox = document.getElementById("focus");
 async function renderFocus(name) {
@@ -235,7 +246,7 @@ async function renderFocus(name) {
   if (focusBox.hidden) return;
   focusBox.innerHTML = `فقط سوژه‌های کلیدواژه‌های شما: <b>${esc(prefs.watch.slice(0, 6).join("، "))}${prefs.watch.length > 6 ? ` و ${fa(prefs.watch.length - 6)} کلمه دیگر` : ""}</b>
     · <a href="#" id="focus-off">نمایش همه سوژه‌ها</a> · <a href="#" id="focus-edit">ویرایش کلمه‌ها</a>`;
-  document.getElementById("focus-off").onclick = async (e) => { e.preventDefault(); await saveNewsPrefs({ watchOnly: false }); show(tab); };
+  document.getElementById("focus-off").onclick = async (e) => { e.preventDefault(); await saveNewsPrefs({ watchOnly: false }); show(tab); tabsNav.querySelector("button.on")?.focus(); };
   document.getElementById("focus-edit").onclick = (e) => { e.preventDefault(); show("settings"); };
 }
 
@@ -490,7 +501,7 @@ async function showDash(id) {
   const on = (name) => tabAvailable(name);
   const missed = a ? [
     // not set up yet (no site, feed or competitors): the tile says so and opens the three steps
-    on("gap") ? (gapS ? tile("gap", count(gaps), "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : "ok") : tile("gap", "؟", "شکاف پوشش تنظیم نشده؛ راه‌اندازی")) : "",
+    on("gap") ? (gapS ? tile("gap", count(gaps), "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : newsFocused(prefs) ? "" : "ok") : tile("gap", "؟", "شکاف پوشش تنظیم نشده؛ راه‌اندازی")) : "",
     on("global") && state.foreignNews ? tile("global", count(global), `رسانه‌های خارجی (${fa(prefs.globalHours)} ساعت)`) : "",
     on("telegram") ? tile("telegram", count(tgOnly), "فقط در تلگرام") : "",
   ].join("") : "";
@@ -567,9 +578,9 @@ async function showTopics(id) {
     `<label>بازه <select id="hours">${[1, 3, 6, 12].map((h) => `<option value="${h}" ${h === prefs.topicHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>
      <label>ترتیب <select id="tsort">${Object.entries(TOPIC_SORTS).map(([key, sort]) => `<option value="${key}" ${key === prefs.topicSort ? "selected" : ""}>${sort.name}</option>`).join("")}</select></label>
      <input id="q" type="search" placeholder="جستجو در تیترها" aria-label="جستجو در تیترها" value="${esc(topicQuery)}" style="flex:1;min-width:100px" />`,
-    `<label>حداقل منبع <select id="min">${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
+    `<label>حداقل منبع <select id="min"${newsFocused(prefs) ? ` disabled title="با «فقط کلیدواژه‌های من»، سوژه‌های تک‌منبعی هم می‌آیند"` : ""}>${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
      <label><input id="tours" type="checkbox" ${prefs.topicHideOurs ? "checked" : ""} /> بدون آنچه زده‌ایم</label>`,
-    (prefs.minSources !== 2 ? 1 : 0) + (prefs.topicHideOurs ? 1 : 0) + (prefs.topics.length ? 1 : 0))
+    (prefs.minSources !== 2 && !newsFocused(prefs) ? 1 : 0) + (prefs.topicHideOurs ? 1 : 0) + (prefs.topics.length ? 1 : 0))
     + `<div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
   wireControls();
   const bar = topicBar(prefs, () => show("topics"));
@@ -664,7 +675,7 @@ async function showGap(id) {
     (stories.length ? stories.map((s) => storyCard(s, res.data.now, {
       meta: `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>`,
       menu: `<button type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ برای همه تیم پنهان می‌شود و هشدار نمی‌دهد">رد شد</button>`,
-    })).join("") : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
+    })).join("") : `<div class="empty">${emptyText(prefs, "شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.")}</div>`);
   chrome.runtime.sendMessage({ type: "news-gap-seen", ids: stories.map((s) => `${site.id}:${s.id}`) }).catch(() => {});
 }
 
@@ -794,7 +805,7 @@ async function showGlobal(id) {
   list.innerHTML = staleNote(res.data) +
     `<details class="about muted"><summary>سوژه‌هایی که دست‌کم ${fa(res.data.minSources)} رسانه خارجی گفته‌اند. <u>بیشتر</u></summary>«در رسانه فارسی دیده شد» یعنی نام‌های لاتین سوژه (شرکت، محصول) در تیتر یک رسانه فارسی هست؛ سوژه بدون این برچسب هم ممکن است به فارسی کار شده باشد، پس پیش از نوشتن بررسی کنید.</details>` +
     (stories.length ? stories.map((s) => globalCard(s, res.data.now, res.data.risingHours)).join("")
-      : `<div class="empty">${all.length ? "همه سوژه‌های این بازه در رسانه‌های فارسی دیده شده‌اند." : "در این بازه سوژه‌ای با این تعداد منبع نیست."}</div>`);
+      : `<div class="empty">${all.length ? "همه سوژه‌های این بازه در رسانه‌های فارسی دیده شده‌اند." : emptyText(prefs, "در این بازه سوژه‌ای با این تعداد منبع نیست.")}</div>`);
 }
 
 // «۲ ساعت و ۵ دقیقه»
@@ -1010,7 +1021,7 @@ async function keywordIdeas(seed, progress) {
     progress(Math.min(i + 4, queries.length), queries.length);
   }
   const words = newsFold(seed).split(" ");
-  return [...found].filter((s) => { const folded = ` ${newsFold(s)} `; return words.every((w) => folded.includes(w)); }).slice(0, 300);
+  return [...found].filter((s) => { const folded = ` ${newsFold(s)} `; return words.every((w) => folded.includes(` ${w} `)); }).slice(0, 300);
 }
 
 function keywordType(phrase, informational) {
@@ -1038,7 +1049,7 @@ async function showKeywords(id) {
     const shown = kwRows.filter((r) => kwMode === "all" || r.type !== "other");
     setExport(`کلمات پرجستجو ${kwSeed}`, ["عبارت", "نوع", "جستجوی ماهانه"], shown.map((r) => [r.keyword, KW_TYPES[r.type], r.volume ?? ""]));
     list.innerHTML = kwNote + (shown.length ? `<p class="muted">${fa(shown.length)} عبارت از ${fa(kwRows.length)} عبارتی که گوگل برای «${esc(kwSeed)}» پیشنهاد می‌دهد، پرجستجوترین اول. «—» یعنی جت‌سئو هنوز حجم جستجوی آن عبارت را ندارد (عبارت تازه یا کم‌جستجو).</p>
-      <section class="card"><table class="kw"><thead><tr><th>عبارت</th><th>نوع</th><th class="num">جستجوی ماهانه</th><th></th></tr></thead><tbody>${shown.map((r) => `<tr>
+      <section class="card"><table class="kw"><thead><tr><th>عبارت</th><th>نوع</th><th class="num">جستجوی ماهانه</th><th aria-label="خبرهای این عبارت"></th></tr></thead><tbody>${shown.map((r) => `<tr>
         <td><a href="https://www.google.com/search?q=${encodeURIComponent(r.keyword)}&hl=fa" target="_blank" rel="noopener" dir="auto">${esc(r.keyword)}</a></td>
         <td><span class="badge ${r.type === "question" ? "watch" : r.type === "info" ? "tg" : ""}">${KW_TYPES[r.type]}</span></td>
         <td class="num">${r.volume == null ? "—" : fa(r.volume)}</td>
@@ -1054,10 +1065,11 @@ async function showKeywords(id) {
   };
   document.getElementById("kwform").onsubmit = async (e) => {
     e.preventDefault();
+    const seed = document.getElementById("kwq").value.replace(/\s+/g, " ").trim();
+    // at least a letter or digit: punctuation alone folds to nothing, which every phrase «holds»
+    if (newsFold(seed).length < 2) return;
     // in the submit's user gesture, before anything is awaited; true at once when already granted
     const allowed = chrome.permissions.request({ origins: [SUGGEST_ORIGIN] }).catch(() => false);
-    const seed = document.getElementById("kwq").value.replace(/\s+/g, " ").trim();
-    if (seed.length < 2) return;
     const button = e.target.querySelector("button[type=submit]");
     button.disabled = true;
     setExport(null);
@@ -1067,14 +1079,16 @@ async function showKeywords(id) {
       return;
     }
     document.getElementById("kwperm").hidden = true;
-    list.innerHTML = `<div class="empty" id="kwwait">در حال خواندن پیشنهادهای گوگل…</div>`;
+    list.innerHTML = `<div class="empty" id="kwwait" aria-live="off">در حال خواندن پیشنهادهای گوگل…</div>`;
     const ideas = await keywordIdeas(seed, (done, all) => {
       const wait = document.getElementById("kwwait");
       if (wait && id === loadId) wait.textContent = `در حال خواندن پیشنهادهای گوگل… ${fa(done)} از ${fa(all)}`;
     });
     // the seed alone is always there: more than it means Google answered
     const res = ideas.length > 1 ? await newsApi("keywords", "POST", ideas) : { status: 200, data: { keywords: [] } };
-    if (res.status === 403) return start();
+    if (res.status === 401) return signedOut();
+    // a search left behind (another list is open now) must not load the app again over it
+    if (res.status === 403) return id === loadId ? start() : undefined;
     const known = new Map((res.data?.keywords ?? []).map((k) => [k.keyword, k]));
     kwSeed = seed;
     // an older server has no api/News/keywords: the phrases still show, without their searches
@@ -1082,7 +1096,8 @@ async function showKeywords(id) {
     kwRows = (ideas.length > 1 ? ideas : []).map((keyword) => ({ keyword, volume: known.get(keyword)?.volume ?? null, type: keywordType(keyword, known.get(keyword)?.informational) }))
       // the most searched first; a phrase without a known volume after those with one, questions before the rest
       .sort((a, b) => (b.volume ?? -1) - (a.volume ?? -1) || (a.type === "question" ? 0 : 1) - (b.type === "question" ? 0 : 1));
-    if (id !== loadId) return;
+    // the view was drawn again while Google answered (⟳, or away and back): it draws once more, with these rows
+    if (id !== loadId) { if (tab === "keywords") show("keywords"); return; }
     button.disabled = false;
     render();
   };
@@ -1195,7 +1210,7 @@ async function showTelegram(id) {
       <div class="meta"><span class="badge late">${fa(p.relative)} برابر معمول کانال</span><span class="badge">${fa(p.perHour)} بازدید در ساعت</span>
         ${p.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : ""}
         <span>${esc(p.channel)} · ${fa(p.views)} بازدید · ${ago(p.at, res.data.now)}</span></div>
-    </article>`).join("") : `<div class="empty">هنوز پستی دو بار خوانده نشده است؛ چند دقیقه بعد دوباره ببینید.</div>`);
+    </article>`).join("") : `<div class="empty">${emptyText(prefs, "هنوز پستی دو بار خوانده نشده است؛ چند دقیقه بعد دوباره ببینید.")}</div>`);
     return;
   }
   const stories = newsPersonal(res.data.stories, prefs);
@@ -1203,7 +1218,7 @@ async function showTelegram(id) {
   // the owner asks for the channels of the team's field in the panel («سایت و رقبا»); JetSEO adds them after a look
   const own = state?.access?.role === "owner" ? ` <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=sites")}" target="_blank" rel="noopener">پیشنهاد کانال تلگرام حوزه خودتان در پنل</a>` : "";
   list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minChannels)} کانال تلگرام گفته‌اند و هنوز هیچ سایتی نه.${own}</p>` +
-    (stories.length ? stories.map((s) => storyCard(s, res.data.now)).join("") : `<div class="empty">در این بازه سوژه‌ای فقط در تلگرام نیست.</div>`);
+    (stories.length ? stories.map((s) => storyCard(s, res.data.now)).join("") : `<div class="empty">${emptyText(prefs, "در این بازه سوژه‌ای فقط در تلگرام نیست.")}</div>`);
 }
 
 // «چندرسانه‌ای» (with the module): the server keeps no media type, so an item's is read from its headline's marker,
@@ -1263,7 +1278,7 @@ async function showMedia(id) {
     const open = stories.filter((s) => s.sources >= MEDIA_CHANCE_SITES && !s.media.length);
     setExport("چندرسانه‌ای فرصت", STORY_HEADER, open.map((s) => storyRow(s)));
     list.innerHTML = `<p class="muted">سوژه‌هایی که دست‌کم ${fa(MEDIA_CHANCE_SITES)} سایت کار کرده‌اند و در تیترهایشان هنوز ویدئو، عکس، اینفوگرافیک یا صوتی نیست.</p>` +
-      (open.length ? open.map((s) => storyCard(s, now)).join("") : `<div class="empty">در این بازه سوژه پرمنبعی بی‌چندرسانه‌ای نیست.</div>`);
+      (open.length ? open.map((s) => storyCard(s, now)).join("") : `<div class="empty">${emptyText(prefs, "در این بازه سوژه پرمنبعی بی‌چندرسانه‌ای نیست.")}</div>`);
     return;
   }
   const made = stories.filter((s) => s.media.length).sort((a, b) => b.media.length - a.media.length || b.sources - a.sources);
@@ -1273,7 +1288,7 @@ async function showMedia(id) {
   const rows = (media) => `<ul class="list">${media.map((i) => `<li><span class="badge media">${MEDIA_KINDS[i.kind]}</span>
     <a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a> <span class="muted">${esc(i.source)} · ${ago(i.at, now)}</span></li>`).join("")}</ul>`;
   list.innerHTML = `<p class="muted">سوژه‌هایی که رسانه‌ها برایشان ویدئو، عکس، اینفوگرافیک یا صوت منتشر کرده‌اند (از روی تیتر و آدرس هر مطلب).</p>` +
-    (made.length ? made.map((s) => storyCard(s, now, { meta: badges(s.media), body: rows(s.media) })).join("") : `<div class="empty">در این بازه مطلب چندرسانه‌ای پیدا نشد.</div>`);
+    (made.length ? made.map((s) => storyCard(s, now, { meta: badges(s.media), body: rows(s.media) })).join("") : `<div class="empty">${emptyText(prefs, "در این بازه مطلب چندرسانه‌ای پیدا نشد.")}</div>`);
 }
 
 // «کپی برای پیام‌رسان»: a story as plain text for the team's Telegram or Bale group.
