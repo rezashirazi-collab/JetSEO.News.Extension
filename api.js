@@ -154,7 +154,7 @@ function newsWatched(title, prefs) {
 // «فقط کلیدواژه‌های من» is on: only with words of the user's own, or every list would be empty.
 const newsFocused = (prefs) => !!prefs.watchOnly && prefs.watch.length > 0;
 
-// «Global» stories as the user sees them: watch also for one of the user's own watched words (a Latin one, «openai»,
+// «رسانه‌های خارجی» stories as the user sees them: watch also for one of the user's own watched words (a Latin one, «openai»,
 // matches the English headlines as it is; the server set watch for the team's), and without the stories the team
 // dismissed unless showDismissed. The Persian filters (excluded words, topics, muted sources) do not apply.
 function newsGlobal(stories, prefs, showDismissed = false) {

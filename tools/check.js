@@ -4,7 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-// api.js is a plain script of function declarations (the background loads it with importScripts)
+// api.js is a plain script of top-level declarations, no module (the background loads it with importScripts): its
+// functions become the context's own
 const api = vm.createContext({});
 vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "api.js"), "utf8"), api);
 

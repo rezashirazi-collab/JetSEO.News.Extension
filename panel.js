@@ -235,12 +235,12 @@ function show(name) {
 // «فقط کلیدواژه‌های من» (prefs.watchOnly, set in «تنظیمات»): the story lists keep only the stories with a watched word
 // (api.js newsFocused). Over each of those lists a line says so, with the words and the way back: a list that is short
 // or empty for no reason in sight reads as «no news».
-// an empty list while it is on is empty because of the words, whatever the list's own reason would be
-const emptyText = (prefs, text) => (newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست." : text);
-// «سوژه‌های داغ» then also lists what one site alone told: a followed subject is seldom a story of many sites
-const topicMinSources = (prefs) => (newsFocused(prefs) ? 1 : prefs.minSources);
 const FOCUS_TABS = ["dash", "topics", "gap", "telegram", "media", "global"];
 const focusBox = document.getElementById("focus");
+// While it is on, an empty list is empty because of the words, whatever the list's own reason would be.
+const emptyText = (prefs, text) => (newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست." : text);
+// While it is on, «سوژه‌های داغ» also lists what one site alone told: a followed subject is seldom a story of many sites.
+const topicMinSources = (prefs) => (newsFocused(prefs) ? 1 : prefs.minSources);
 async function renderFocus(name) {
   const prefs = await newsPrefs();
   if (name !== tab) return;
@@ -252,7 +252,7 @@ async function renderFocus(name) {
   document.getElementById("focus-edit").onclick = (e) => { e.preventDefault(); show("settings"); };
 }
 
-// «خروجی» (the header's ⬇): the list on screen as a CSV file, UTF-8 with a BOM so that Excel reads the Persian. Each
+// «خروجی» (the header's «⬇ اکسل»): the list on screen as a CSV file, UTF-8 with a BOM so that Excel reads the Persian. Each
 // list calls setExport with the rows it shows (after its filters and order); the button is there only while it has any.
 const exportButton = document.getElementById("export");
 let exportData = null;
@@ -322,13 +322,13 @@ document.getElementById("view").onclick = async (e) => {
 // s.trend: the Google trend or rising Wikipedia article in its headlines; s.channels: Telegram channels that told it
 // (s.sources counts sites); s.telegramLead: minutes the first channel was ahead of the first site. All from the server.
 // s.fresh: not on the list the last time it was in sight (markFresh). body: shown under the meta line, before the headlines.
-// s.mark, s.ours, s.recent: the team's «برداشتم», a story one of its own sites tells, and the sources that joined in the
+// s.mark, s.ours, s.recent: the team's «من می‌نویسم», a story one of its own sites tells, and the sources that joined in the
 // last risingMinutes (the server's News.RisingMinutes, kept from the last list). A server without them sends none: the
-// card then shows neither the badges nor the «برداشتم» button.
+// card then shows neither the badges nor the «من می‌نویسم» button.
 let risingMinutes = 60;
 // ---------------------------------------------------------------- shared by every list
 
-// «برداشتم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
+// «من می‌نویسم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
 // member now sees it.
 main.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-mark]");
@@ -405,7 +405,7 @@ function cardShell({ title, url, ltr = false, count, badges = [], meta = "", mai
   </article>`;
 }
 
-// the team's «برداشتم» on a story (s.mark from the server; a server without marks sends none, and no button shows)
+// the team's «من می‌نویسم» on a story (s.mark from the server; a server without marks sends none, and no button shows)
 const takeButton = (s) => ("mark" in s
   ? `<button class="btn ghost small" type="button" data-mark="${s.mark?.status === "taken" ? "none" : "taken"}" data-story="${esc(s.id)}" title="${s.mark?.status === "taken" ? "سوژه برای تیم آزاد می‌شود" : "به تیم می‌گوید شما روی این سوژه کار می‌کنید"}">${s.mark?.status === "taken" ? "منصرف شدم" : "من می‌نویسم"}</button>`
   : "");
@@ -605,8 +605,8 @@ async function showTopics(id) {
   };
   document.getElementById("q").oninput = (e) => { topicQuery = e.target.value; if (stories) render(); };
   // ponytail: under «فقط کلیدواژه‌های من» (topicMinSources) the server still sends only the 60 stories with the most
-  // sites, so a one-site story of a busy period can be left
-  // out; an api/News endpoint that searches the headlines for the words would find them all.
+  // sites, so a one-site story of a busy period can be left out; an api/News endpoint that searches the headlines for
+  // the words would find them all.
   const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
@@ -690,7 +690,7 @@ const CATEGORY_FA = { general: "خبر عمومی و جهان", agency: "خبر�
 // s.covers: Persian headlines that hold the story's Latin names («GPT», «OpenAI»); s.ours: the same on the team's own
 // sites. The server finds only those: a story without one may still be told in Persian with every name in Persian
 // letters, so no card says «پوشش داده نشده». s.recent: sources that joined in the last risingHours; s.watch: a watched
-// word (the team's, or the user's own: newsGlobal); s.key: its names, for «زاویه‌ها»; s.mark: the team's mark.
+// word (the team's, or the user's own: newsGlobal); s.key: its names, for «مردم چه می‌پرسند؟»; s.mark: the team's mark.
 function globalCard(s, now, risingHours) {
   const items = s.items ?? [];
   const covers = s.covers ?? [];
@@ -724,8 +724,8 @@ function globalCard(s, now, risingHours) {
   });
 }
 
-// «زاویه‌ها» of a foreign story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
-// fewer of them until Google knows the phrase. On the click only, like the Persian stories' «زاویه‌ها».
+// «مردم چه می‌پرسند؟» of a foreign story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
+// fewer of them until Google knows the phrase. On the click only, like the Persian stories' «مردم چه می‌پرسند؟».
 main.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-gangles]");
   if (!b) return;
@@ -967,7 +967,7 @@ function angleChips(angles, base, heading = "مردم این‌ها را هم ج
 
 // Google's autocomplete for a phrase: what readers search along with it, i.e. the angles worth writing.
 // Google Search is not filtered in Iran, so it is read directly. The host permission is optional (a new required one
-// would disable the extension on update until the user approves it): asked on the first «زاویه‌ها» click.
+// would disable the extension on update until the user approves it): asked on the first «مردم چه می‌پرسند؟» click.
 const SUGGEST_ORIGIN = "https://suggestqueries.google.com/*";
 async function suggestions(q) {
   try {
@@ -983,7 +983,7 @@ async function showTrends(id) {
   const data = await freeApi(id, "google", "ترندهای گوگل");
   if (!data) return;
   const items = data.trends ?? [];
-  // the brief for the team; «زاویه‌ها» adds the angles to it
+  // the brief for the team; «مردم چه می‌پرسند؟» adds the angles to it
   const brief = (t) => [`ترند گوگل: ${t.title}${t.traffic ? ` (${t.traffic} جستجو)` : ""}`,
     ...(t.news ?? []).slice(0, 3).map((x) => `خبر: ${x.title} ${x.url}`)].join("\n");
   setExport("ترند گوگل", ["ترند", "جستجو", "جستجو در گوگل", "خبرهای مرتبط"], items.map((t) =>
@@ -1314,7 +1314,7 @@ main.addEventListener("click", async (e) => {
   setTimeout(() => { b.textContent = label; }, 2000);
 });
 
-// «زاویه‌ها» of a story: Google's suggestions for its trend, or for its headline cut shorter until Google knows it
+// «مردم چه می‌پرسند؟» of a story: Google's suggestions for its trend, or for its headline cut shorter until Google knows it
 // (a whole headline rarely has any). Asked only on the click: a list of stories would be a burst of requests.
 main.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-angles]");
