@@ -52,13 +52,17 @@ async function newsSignOut() {
   }
 }
 
-// An api/News path, GET unless method says POST (the team's marks): { status, data }. status 0 = no network; a 401
-// forgets the account.
-async function newsApi(path, method = "GET") {
+// An api/News path, GET unless method says POST (the team's marks), with body as its JSON when given (the phrases of
+// «کلمات پرجستجو»): { status, data }. status 0 = no network; a 401 forgets the account.
+async function newsApi(path, method = "GET", body) {
   const account = await newsAccount();
   if (!account) return { status: 401, data: null };
   try {
-    const response = await fetch(`${NEWS_API}/${path}`, { method, credentials: "omit", headers: { "X-JetSEO-User": account.token, Accept: "application/json" } });
+    const response = await fetch(`${NEWS_API}/${path}`, {
+      method, credentials: "omit",
+      headers: { "X-JetSEO-User": account.token, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
     if (response.status === 401) await chrome.storage.local.remove(NEWS_ACCOUNT_KEY);
     const data = response.headers.get("content-type")?.includes("json") ? await response.json() : null;
     return { status: response.status, data };
@@ -98,6 +102,8 @@ async function newsPrefs() {
   return {
     excluded: prefs.excluded ?? [],
     watch: prefs.watch ?? [],
+    // «فقط کلیدواژه‌های من»: the lists keep only the stories with a watched word (newsFocused)
+    watchOnly: prefs.watchOnly ?? false,
     muted: prefs.muted ?? [],
     topics: prefs.topics ?? [],
     notifyGap: prefs.notifyGap ?? true,
@@ -145,13 +151,17 @@ function newsWatched(title, prefs) {
   return prefs.watch.some((w) => newsMatches(folded, w));
 }
 
+// «فقط کلیدواژه‌های من» is on: only with words of the user's own, or every list would be empty.
+const newsFocused = (prefs) => !!prefs.watchOnly && prefs.watch.length > 0;
+
 // «Global» stories as the user sees them: watch also for one of the user's own watched words (a Latin one, «openai»,
 // matches the English headlines as it is; the server set watch for the team's), and without the stories the team
 // dismissed unless showDismissed. The Persian filters (excluded words, topics, muted sources) do not apply.
 function newsGlobal(stories, prefs, showDismissed = false) {
   return (stories ?? [])
     .filter((s) => showDismissed || s.mark?.status !== "dismissed")
-    .map((s) => (!s.watch && (s.items ?? []).some((i) => newsWatched(i.title, prefs)) ? { ...s, watch: true } : s));
+    .map((s) => (!s.watch && (s.items ?? []).some((i) => newsWatched(i.title, prefs)) ? { ...s, watch: true } : s))
+    .filter((s) => !newsFocused(prefs) || s.watch);
 }
 
 // The stories the user's own filters leave: none of their words in any headline, none only from muted sources, and of
@@ -165,7 +175,20 @@ function newsPersonal(stories, prefs) {
     .filter((s) => s.items.length > 0)
     .filter((s) => !s.items.some((i) => prefs.excluded.some((w) => newsMatches(newsFold(i.title), w))))
     .map((s) => (!s.watch && [s.title, ...s.items.map((i) => i.title)].some((t) => newsWatched(t, prefs)) ? { ...s, watch: true } : s))
-    .filter((s) => !prefs.topics.length || !("topic" in s) || s.watch || prefs.topics.includes(s.topic));
+    .filter((s) => !prefs.topics.length || !("topic" in s) || s.watch || prefs.topics.includes(s.topic))
+    // watch: one of the user's own words, or of the team's (set by the server)
+    .filter((s) => !newsFocused(prefs) || s.watch);
+}
+
+// A list as the text of a CSV file («خروجی»): a BOM so that Excel reads the Persian, CRLF rows, quotes doubled.
+// Text that begins with = + - or @ would run as a formula in Excel, and the headlines come from the web: such a cell
+// gets a leading apostrophe. Numbers are passed as numbers and stay as they are (a negative lag is «-12»).
+function newsCsv(header, rows) {
+  const cell = (value) => {
+    const s = typeof value === "string" ? value.replace(/^([=+\-@\t\r])/, "'$1") : String(value ?? "");
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return "﻿" + [header, ...rows].map((row) => row.map(cell).join(",")).join("\r\n");
 }
 
 // Gap stories the user set aside («رد شد»), as `${siteId}:${storyId}`: neither listed nor alerted again.
