@@ -237,6 +237,8 @@ function show(name) {
 // or empty for no reason in sight reads as «no news».
 // an empty list while it is on is empty because of the words, whatever the list's own reason would be
 const emptyText = (prefs, text) => (newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست." : text);
+// «سوژه‌های داغ» then also lists what one site alone told: a followed subject is seldom a story of many sites
+const topicMinSources = (prefs) => (newsFocused(prefs) ? 1 : prefs.minSources);
 const FOCUS_TABS = ["dash", "topics", "gap", "telegram", "media", "global"];
 const focusBox = document.getElementById("focus");
 async function renderFocus(name) {
@@ -472,7 +474,7 @@ async function showDash(id) {
   const get = (path) => newsApi(path).then((r) => (r.status === 200 ? r.data : null));
   const [topics, gap, tg, mine, foreign, google, wiki, days] = await Promise.all([
     // a list switched off in the settings is not asked for
-    a && tabAvailable("topics") && get(`topics?hours=${prefs.topicHours}&minSources=${newsFocused(prefs) ? 1 : prefs.minSources}`),
+    a && tabAvailable("topics") && get(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`),
     a && tabAvailable("gap") && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.gapHours}`),
     a && tabAvailable("telegram") && get(`telegram?mode=only&hours=${prefs.telegramHours}`),
     a && tabAvailable("mine") && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
@@ -602,10 +604,10 @@ async function showTopics(id) {
       : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست؛ بازه را بلندتر کنید." : `در این بازه سوژه‌ای با این تعداد منبع${prefs.topics.length ? " در موضوع‌های انتخاب‌شده" : ""} نیست.`}</div>`) + hidden;
   };
   document.getElementById("q").oninput = (e) => { topicQuery = e.target.value; if (stories) render(); };
-  // «فقط کلیدواژه‌های من»: also what one site alone told, since a followed subject is seldom a story of many sites.
-  // ponytail: the server sends the 60 stories with the most sites, so a one-site story of a busy period can be left
+  // ponytail: under «فقط کلیدواژه‌های من» (topicMinSources) the server still sends only the 60 stories with the most
+  // sites, so a one-site story of a busy period can be left
   // out; an api/News endpoint that searches the headlines for the words would find them all.
-  const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${newsFocused(prefs) ? 1 : prefs.minSources}`);
+  const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
@@ -1088,7 +1090,10 @@ async function showKeywords(id) {
     const res = ideas.length > 1 ? await newsApi("keywords", "POST", ideas) : { status: 200, data: { keywords: [] } };
     if (res.status === 401) return signedOut();
     // a search left behind (another list is open now) must not load the app again over it
-    if (res.status === 403) return id === loadId ? start() : undefined;
+    if (res.status === 403) {
+      if (id === loadId) start();
+      return;
+    }
     const known = new Map((res.data?.keywords ?? []).map((k) => [k.keyword, k]));
     kwSeed = seed;
     // an older server has no api/News/keywords: the phrases still show, without their searches
