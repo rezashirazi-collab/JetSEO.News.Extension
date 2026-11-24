@@ -67,6 +67,13 @@ function staleNote(data) {
     خواندن خبرها در سرور جت‌سئو متوقف شده و خالی بودن فهرست به معنی نبودن سوژه نیست. لطفاً به پشتیبانی خبر دهید.</div>`;
 }
 
+// Signed out, or no state: the export of the last list, the «فقط کلیدواژه‌های من» line and the height held for a redraw go.
+function clearList() {
+  setExport(null);
+  focusBox.hidden = true;
+  main.style.minHeight = "";
+}
+
 function setBanner(html, bad = false) {
   banner.hidden = !html;
   banner.className = bad ? "bad" : "";
@@ -76,12 +83,14 @@ function setBanner(html, bad = false) {
 async function start() {
   const account = await newsAccount();
   if (!account) return signedOut();
-  main.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
+  // ⟳ over a list: it stays in sight while the state loads, so show() can keep its place
+  if (!main.querySelector(".card")) main.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
   const res = await newsApi("state");
   if (res.status === 401) return signedOut();
   if (res.status !== 200) {
     state = null;
     renderNav();
+    clearList();
     main.innerHTML = `<div class="center"><p>اتصال به جت‌سئو برقرار نشد.</p><button class="btn ghost" id="retry" type="button">دوباره</button></div>`;
     document.getElementById("retry").onclick = start;
     return;
@@ -138,6 +147,7 @@ async function takeGo() {
 function signedOut() {
   state = null;
   renderNav();
+  clearList();
   who.textContent = "";
   setBanner(null);
   main.innerHTML = `<div class="center">
@@ -157,12 +167,12 @@ function signedOut() {
 // one). «تنظیمات» is the header's gear, not a list.
 const TAB_NAMES = {
   dash: "داشبورد", topics: "سوژه‌های داغ", gap: "شکاف پوشش", telegram: "تلگرام", media: "چندرسانه‌ای", global: "رسانه‌های خارجی",
-  trends: "ترند گوگل", wiki: "ویکی‌پدیا", days: "مناسبت‌ها", mine: "مطالب ما",
+  trends: "ترند گوگل", keywords: "کلمات پرجستجو", wiki: "ویکی‌پدیا", days: "مناسبت‌ها", mine: "مطالب ما",
 };
 const GROUPS = [
   { key: "today", name: "امروز", tabs: ["dash"] },
   { key: "stories", name: "سوژه‌ها", tabs: ["topics", "gap", "telegram", "media", "global"] },
-  { key: "trends", name: "ترندها", tabs: ["trends", "wiki", "days"] },
+  { key: "trends", name: "ترندها", tabs: ["trends", "keywords", "wiki", "days"] },
   { key: "site", name: "سایت ما", tabs: ["mine"] },
 ];
 const subtabsNav = document.getElementById("subtabs");
@@ -197,6 +207,12 @@ function renderNav() {
 let gapBadge = 0;
 
 function show(name) {
+  // The same list drawn again («من می‌نویسم», a filter, ⟳, the 3-minute refresh): it stays where the user was reading,
+  // with the «جزئیات» they had opened. main keeps its height while the list loads, so the page does not jump to the top.
+  const keep = name === tab && name !== "settings" && main.querySelector(".card")
+    ? { open: new Set([...main.querySelectorAll("details.more[open]")].map((d) => d.closest(".card")?.querySelector("h3")?.textContent)) }
+    : null;
+  main.style.minHeight = keep ? `${main.offsetHeight}px` : "";
   tab = name;
   const group = GROUPS.find((g) => g.tabs.includes(name));
   if (group) lastTab[group.key] = name;
@@ -205,8 +221,63 @@ function show(name) {
   // for JetSEO's use report: which module tabs a member opens (once a half hour each; «رسانه‌های خارجی» counts itself, by category)
   if (state?.access && PERSIAN_TABS.includes(name)) countOnce(`${name}-open`);
   const id = ++loadId;
-  ({ dash: showDash, topics: showTopics, gap: showGap, global: showGlobal, mine: showMine, trends: showTrends, wiki: showWiki, days: showDays, telegram: showTelegram, media: showMedia, settings: showSettings })[name](id);
+  renderFocus(name);
+  // the list that opens says what it has to save, once it has drawn its rows
+  setExport(null);
+  const drawn = ({ dash: showDash, topics: showTopics, gap: showGap, global: showGlobal, mine: showMine, trends: showTrends, keywords: showKeywords, wiki: showWiki, days: showDays, telegram: showTelegram, media: showMedia, settings: showSettings })[name](id);
+  if (keep) Promise.resolve(drawn).catch(() => {}).then(() => {
+    if (id !== loadId) return;
+    for (const d of main.querySelectorAll("details.more")) if (keep.open.has(d.closest(".card")?.querySelector("h3")?.textContent)) d.open = true;
+    main.style.minHeight = "";
+  });
 }
+
+// «فقط کلیدواژه‌های من» (prefs.watchOnly, set in «تنظیمات»): the story lists keep only the stories with a watched word
+// (api.js newsFocused). Over each of those lists a line says so, with the words and the way back: a list that is short
+// or empty for no reason in sight reads as «no news».
+const FOCUS_TABS = ["dash", "topics", "gap", "telegram", "media", "global"];
+const focusBox = document.getElementById("focus");
+// While it is on, an empty list is empty because of the words, whatever the list's own reason would be.
+const emptyText = (prefs, text) => (newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست." : text);
+// While it is on, «سوژه‌های داغ» also lists what one site alone told: a followed subject is seldom a story of many sites.
+const topicMinSources = (prefs) => (newsFocused(prefs) ? 1 : prefs.minSources);
+async function renderFocus(name) {
+  const prefs = await newsPrefs();
+  if (name !== tab) return;
+  focusBox.hidden = !(state?.access && FOCUS_TABS.includes(name) && newsFocused(prefs));
+  if (focusBox.hidden) return;
+  focusBox.innerHTML = `فقط سوژه‌های کلیدواژه‌های شما: <b>${esc(prefs.watch.slice(0, 6).join("، "))}${prefs.watch.length > 6 ? ` و ${fa(prefs.watch.length - 6)} کلمه دیگر` : ""}</b>
+    · <a href="#" id="focus-off">نمایش همه سوژه‌ها</a> · <a href="#" id="focus-edit">ویرایش کلمه‌ها</a>`;
+  document.getElementById("focus-off").onclick = async (e) => { e.preventDefault(); await saveNewsPrefs({ watchOnly: false }); show(tab); tabsNav.querySelector("button.on")?.focus(); };
+  document.getElementById("focus-edit").onclick = (e) => { e.preventDefault(); show("settings"); };
+}
+
+// «خروجی» (the header's «⬇ اکسل»): the list on screen as a CSV file, UTF-8 with a BOM so that Excel reads the Persian. Each
+// list calls setExport with the rows it shows (after its filters and order); the button is there only while it has any.
+const exportButton = document.getElementById("export");
+let exportData = null;
+function setExport(name, header, rows) {
+  exportData = rows?.length ? { name, header, rows } : null;
+  exportButton.hidden = !exportData;
+}
+exportButton.onclick = () => {
+  if (!exportData) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([newsCsv(exportData.header, exportData.rows)], { type: "text/csv;charset=utf-8" }));
+  a.download = `jetseo-news-${exportData.name.replace(/[\\/:*?"<>|\s]+/g, "-")}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+// the server's local time, «2026-11-23T10:12:00», as a spreadsheet reads it
+const csvTime = (at) => String(at ?? "").replace("T", " ").slice(0, 16);
+// A Persian story as a row; `more` = the columns of the list it is in (a gap's competitors, the media made for it).
+const STORY_HEADER = ["تیتر", "تعداد سایت", "تعداد کانال تلگرام", "اولین منبع", "اولین انتشار", "موضوع", "برچسب‌ها", "لینک", "منابع"];
+const storyRow = (s, more = []) => [
+  s.title, s.sources ?? 0, s.channels ?? 0, s.firstSource ?? "", csvTime(s.firstAt), topicName(s.topic) ?? "",
+  [s.watch ? "کلیدواژه تحت نظر" : "", s.ours ? "در سایت شما" : "", s.mark?.status === "taken" ? `می‌نویسد: ${s.mark.by || "یکی از اعضا"}` : "",
+    s.telegramLead > 0 ? "اول در تلگرام" : "", s.trend ? `ترند ${s.trend.source}: ${s.trend.text}` : ""].filter(Boolean).join("، "),
+  s.items?.[0]?.url ?? "", (s.items ?? []).map((i) => i.source).join("، "), ...more,
+];
 
 tabsNav.addEventListener("click", (e) => {
   const group = GROUPS.find((g) => g.key === e.target.closest("button[data-group]")?.dataset.group);
@@ -251,13 +322,13 @@ document.getElementById("view").onclick = async (e) => {
 // s.trend: the Google trend or rising Wikipedia article in its headlines; s.channels: Telegram channels that told it
 // (s.sources counts sites); s.telegramLead: minutes the first channel was ahead of the first site. All from the server.
 // s.fresh: not on the list the last time it was in sight (markFresh). body: shown under the meta line, before the headlines.
-// s.mark, s.ours, s.recent: the team's «برداشتم», a story one of its own sites tells, and the sources that joined in the
+// s.mark, s.ours, s.recent: the team's «من می‌نویسم», a story one of its own sites tells, and the sources that joined in the
 // last risingMinutes (the server's News.RisingMinutes, kept from the last list). A server without them sends none: the
-// card then shows neither the badges nor the «برداشتم» button.
+// card then shows neither the badges nor the «من می‌نویسم» button.
 let risingMinutes = 60;
 // ---------------------------------------------------------------- shared by every list
 
-// «برداشتم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
+// «من می‌نویسم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
 // member now sees it.
 main.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-mark]");
@@ -334,12 +405,12 @@ function cardShell({ title, url, ltr = false, count, badges = [], meta = "", mai
   </article>`;
 }
 
-// the team's «برداشتم» on a story (s.mark from the server; a server without marks sends none, and no button shows)
+// the team's «من می‌نویسم» on a story (s.mark from the server; a server without marks sends none, and no button shows)
 const takeButton = (s) => ("mark" in s
-  ? `<button class="btn ghost small" type="button" data-mark="${s.mark?.status === "taken" ? "none" : "taken"}" data-story="${esc(s.id)}" title="${s.mark?.status === "taken" ? "سوژه برای تیم آزاد می‌شود" : "به تیم می‌گوید شما روی این سوژه کار می‌کنید"}">${s.mark?.status === "taken" ? "آزاد شد" : "برداشتم"}</button>`
+  ? `<button class="btn ghost small" type="button" data-mark="${s.mark?.status === "taken" ? "none" : "taken"}" data-story="${esc(s.id)}" title="${s.mark?.status === "taken" ? "سوژه برای تیم آزاد می‌شود" : "به تیم می‌گوید شما روی این سوژه کار می‌کنید"}">${s.mark?.status === "taken" ? "منصرف شدم" : "من می‌نویسم"}</button>`
   : "");
 const takenBadge = (s, now) => (s.mark?.status === "taken"
-  ? `<span class="badge tg" title="یکی از اعضای تیم روی این سوژه کار می‌کند">برداشته: ${esc(s.mark.by || "یکی از اعضا")} · ${ago(s.mark.at, now)}</span>` : "");
+  ? `<span class="badge tg" title="یکی از اعضای تیم روی این سوژه کار می‌کند">می‌نویسد: ${esc(s.mark.by || "یکی از اعضا")} · ${ago(s.mark.at, now)}</span>` : "");
 
 // A Persian story. extra: { meta, menu, body } of the list it is in (the competitors and «رد شد» of a gap, the media of «چندرسانه‌ای»).
 function storyCard(s, now, extra = {}) {
@@ -362,7 +433,7 @@ function storyCard(s, now, extra = {}) {
     meta: `<span>اولین: ${esc(s.firstSource)} · ${ago(s.firstAt, now)}</span>${extra.meta ?? ""}`,
     main: takeButton(s),
     menu: [
-      `<button type="button" data-angles="${esc(s.trend?.text ?? s.title)}" title="آنچه مخاطب همراه این سوژه جستجو می‌کند">زاویه‌ها</button>`,
+      `<button type="button" data-angles="${esc(s.trend?.text ?? s.title)}" title="آنچه مخاطب همراه این سوژه جستجو می‌کند">مردم چه می‌پرسند؟</button>`,
       `<button type="button" data-copy="${esc(storyText(s))}" title="کپی برای پیام‌رسان">کپی</button>`,
       extra.menu,
     ],
@@ -403,7 +474,7 @@ async function showDash(id) {
   const get = (path) => newsApi(path).then((r) => (r.status === 200 ? r.data : null));
   const [topics, gap, tg, mine, foreign, google, wiki, days] = await Promise.all([
     // a list switched off in the settings is not asked for
-    a && tabAvailable("topics") && get(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`),
+    a && tabAvailable("topics") && get(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`),
     a && tabAvailable("gap") && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.gapHours}`),
     a && tabAvailable("telegram") && get(`telegram?mode=only&hours=${prefs.telegramHours}`),
     a && tabAvailable("mine") && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
@@ -431,7 +502,8 @@ async function showDash(id) {
   // foreign media told, and what only Telegram channels told so far. A list switched off in the settings has no tile.
   const on = (name) => tabAvailable(name);
   const missed = a ? [
-    on("gap") ? tile("gap", gapS ? count(gaps) : "—", "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : "ok") : "",
+    // not set up yet (no site, feed or competitors): the tile says so and opens the three steps
+    on("gap") ? (gapS ? tile("gap", count(gaps), "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : newsFocused(prefs) ? "" : "ok") : tile("gap", "؟", "شکاف پوشش تنظیم نشده؛ راه‌اندازی")) : "",
     on("global") && state.foreignNews ? tile("global", count(global), `رسانه‌های خارجی (${fa(prefs.globalHours)} ساعت)`) : "",
     on("telegram") ? tile("telegram", count(tgOnly), "فقط در تلگرام") : "",
   ].join("") : "";
@@ -508,9 +580,9 @@ async function showTopics(id) {
     `<label>بازه <select id="hours">${[1, 3, 6, 12].map((h) => `<option value="${h}" ${h === prefs.topicHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>
      <label>ترتیب <select id="tsort">${Object.entries(TOPIC_SORTS).map(([key, sort]) => `<option value="${key}" ${key === prefs.topicSort ? "selected" : ""}>${sort.name}</option>`).join("")}</select></label>
      <input id="q" type="search" placeholder="جستجو در تیترها" aria-label="جستجو در تیترها" value="${esc(topicQuery)}" style="flex:1;min-width:100px" />`,
-    `<label>حداقل منبع <select id="min">${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
+    `<label>حداقل منبع <select id="min"${newsFocused(prefs) ? ` disabled title="با «فقط کلیدواژه‌های من»، سوژه‌های تک‌منبعی هم می‌آیند"` : ""}>${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
      <label><input id="tours" type="checkbox" ${prefs.topicHideOurs ? "checked" : ""} /> بدون آنچه زده‌ایم</label>`,
-    (prefs.minSources !== 2 ? 1 : 0) + (prefs.topicHideOurs ? 1 : 0) + (prefs.topics.length ? 1 : 0))
+    (prefs.minSources !== 2 && !newsFocused(prefs) ? 1 : 0) + (prefs.topicHideOurs ? 1 : 0) + (prefs.topics.length ? 1 : 0))
     + `<div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
   wireControls();
   const bar = topicBar(prefs, () => show("topics"));
@@ -527,11 +599,15 @@ async function showTopics(id) {
     const shown = (q ? stories.filter((s) => [s.title, ...s.items.map((i) => i.title)].some((t) => newsFold(t).includes(q))) : [...stories])
       .filter((s) => !prefs.topicHideOurs || !s.ours)
       .sort((TOPIC_SORTS[prefs.topicSort] ?? TOPIC_SORTS.top).by);
+    setExport("سوژه‌های داغ", STORY_HEADER, shown.map((s) => storyRow(s)));
     list.innerHTML = note + (shown.length ? shown.map((s) => storyCard(s, now)).join("")
-      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : `در این بازه سوژه‌ای با این تعداد منبع${prefs.topics.length ? " در موضوع‌های انتخاب‌شده" : ""} نیست.`}</div>`) + hidden;
+      : `<div class="empty">${q ? `سوژه‌ای با «${esc(topicQuery)}» نیست.` : newsFocused(prefs) ? "در این بازه سوژه‌ای با کلیدواژه‌های شما نیست؛ بازه را بلندتر کنید." : `در این بازه سوژه‌ای با این تعداد منبع${prefs.topics.length ? " در موضوع‌های انتخاب‌شده" : ""} نیست.`}</div>`) + hidden;
   };
   document.getElementById("q").oninput = (e) => { topicQuery = e.target.value; if (stories) render(); };
-  const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${prefs.minSources}`);
+  // ponytail: under «فقط کلیدواژه‌های من» (topicMinSources) the server still sends only the 60 stories with the most
+  // sites, so a one-site story of a busy period can be left out; an api/News endpoint that searches the headlines for
+  // the words would find them all.
+  const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
@@ -554,18 +630,19 @@ function hiddenNote(team, personal) {
 
 // What a coverage gap needs, as three steps with what is done ticked: a site of the team, that site's feed, and its
 // competitors. All three are set in the panel by the subscription owner.
-function gapGuide(site) {
+// forMine: «مطالب ما» needs the first two only.
+function gapGuide(site, forMine = false) {
   const owner = state?.access?.role === "owner";
   const link = `<a class="btn" href="${safeUrl((state?.panelUrl ?? "") + "?tab=sites")}" target="_blank" rel="noopener">سایت و رقبا در پنل</a>`;
   const step = (done, title, text) => `<li class="${done ? "done" : ""}"><b>${done ? "✓ " : ""}${title}</b><span class="muted">${text}</span></li>`;
   return `<section class="card guide">
-    <h3>شکاف پوشش با سه قدم راه می‌افتد</h3>
+    <h3>${forMine ? "«مطالب ما» با دو قدم راه می‌افتد" : "شکاف پوشش با سه قدم راه می‌افتد"}</h3>
     <ol>
       ${step(!!site, "سایت خود را انتخاب کنید", "از سایت‌هایی که در پنل جت‌سئو دارید.")}
-      ${step(!!site?.hasFeed, "فید سایت ثبت شود", "بدون فید سایت شما، معلوم نیست چه چیزی را منتشر کرده‌اید.")}
-      ${step(!!site?.competitors, "۵ تا ۱۰ رقیب هم‌حوزه انتخاب کنید", "سوژه‌ای که دست‌کم دو رقیب زده‌اند و شما نه، این‌جا می‌آید و هشدار می‌دهد.")}
+      ${step(!!site?.hasFeed, "فید سایت ثبت شود", "فید (RSS) نشانی‌ای روی سایت شماست که تازه‌ترین خبرها را فهرست می‌کند؛ بدون آن معلوم نیست چه چیزی را منتشر کرده‌اید.")}
+      ${forMine ? "" : step(!!site?.competitors, "۵ تا ۱۰ رقیب هم‌حوزه انتخاب کنید", "سوژه‌ای که دست‌کم دو رقیب زده‌اند و شما نه، این‌جا می‌آید و هشدار می‌دهد.")}
     </ol>
-    ${owner ? link : `<p class="muted">این سه مورد را صاحب اشتراک${state?.access?.ownerName ? ` (${esc(state.access.ownerName)})` : ""} در پنل جت‌سئو تنظیم می‌کند.</p>`}
+    ${owner ? link : `<p class="muted">این موارد را صاحب اشتراک${state?.access?.ownerName ? ` (${esc(state.access.ownerName)})` : ""} در پنل جت‌سئو تنظیم می‌کند.</p>`}
   </section>`;
 }
 
@@ -595,11 +672,12 @@ async function showGap(id) {
   const key = (s) => `${site.id}:${s.id}`;
   risingMinutes = res.data.risingMinutes ?? risingMinutes;
   const stories = newsPersonal(res.data.stories, prefs).filter((s) => !skipped.has(key(s)));
+  setExport(`شکاف پوشش ${site.domain}`, [...STORY_HEADER, "رقبایی که زده‌اند"], stories.map((s) => storyRow(s, [(s.competitors ?? []).join("، ")])));
   list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minCompetitors)} رقیب از ${fa(res.data.competitors)} رقیب شما کار کرده‌اند و ${esc(res.data.site)} نه.</p>` +
     (stories.length ? stories.map((s) => storyCard(s, res.data.now, {
       meta: `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>`,
       menu: `<button type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ برای همه تیم پنهان می‌شود و هشدار نمی‌دهد">رد شد</button>`,
-    })).join("") : `<div class="empty">شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.</div>`);
+    })).join("") : `<div class="empty">${emptyText(prefs, "شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.")}</div>`);
   chrome.runtime.sendMessage({ type: "news-gap-seen", ids: stories.map((s) => `${site.id}:${s.id}`) }).catch(() => {});
 }
 
@@ -612,7 +690,7 @@ const CATEGORY_FA = { general: "خبر عمومی و جهان", agency: "خبر�
 // s.covers: Persian headlines that hold the story's Latin names («GPT», «OpenAI»); s.ours: the same on the team's own
 // sites. The server finds only those: a story without one may still be told in Persian with every name in Persian
 // letters, so no card says «پوشش داده نشده». s.recent: sources that joined in the last risingHours; s.watch: a watched
-// word (the team's, or the user's own: newsGlobal); s.key: its names, for «زاویه‌ها»; s.mark: the team's mark.
+// word (the team's, or the user's own: newsGlobal); s.key: its names, for «مردم چه می‌پرسند؟»; s.mark: the team's mark.
 function globalCard(s, now, risingHours) {
   const items = s.items ?? [];
   const covers = s.covers ?? [];
@@ -637,7 +715,7 @@ function globalCard(s, now, risingHours) {
     meta: first ? `<span>اولین: <bdi>${esc(first.source)}</bdi> · ${ago(s.firstAt, now)}</span> ${translate(first.url)}` : "",
     main: takeButton(s),
     menu: [
-      s.key ? `<button type="button" data-gangles="${esc(s.key)}" title="آنچه مخاطب ایرانی همراه نام‌های این سوژه جستجو می‌کند">زاویه‌ها</button>` : "",
+      s.key ? `<button type="button" data-gangles="${esc(s.key)}" title="آنچه مخاطب ایرانی همراه نام‌های این سوژه جستجو می‌کند">مردم چه می‌پرسند؟</button>` : "",
       `<button type="button" data-mark="${dismissed ? "none" : "dismissed"}" data-story="${esc(s.id)}" title="${dismissed ? "سوژه دوباره برای همه تیم نمایش داده می‌شود" : "سوژه برای همه اعضای تیم پنهان می‌شود"}">${dismissed ? "برگرداندن برای تیم" : "رد برای تیم"}</button>`,
     ],
     details: `<div class="sub">تیترها (${fa(items.length)})</div><ul dir="ltr" lang="en">${headlines}</ul>
@@ -646,8 +724,8 @@ function globalCard(s, now, risingHours) {
   });
 }
 
-// «زاویه‌ها» of a foreign story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
-// fewer of them until Google knows the phrase. On the click only, like the Persian stories' «زاویه‌ها».
+// «مردم چه می‌پرسند؟» of a foreign story: Google's suggestions in Iran for its names (s.key, «nvidia jensen huang»), then for
+// fewer of them until Google knows the phrase. On the click only, like the Persian stories' «مردم چه می‌پرسند؟».
 main.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-gangles]");
   if (!b) return;
@@ -657,7 +735,7 @@ main.addEventListener("click", async (e) => {
   b.disabled = true;
   if (!(await allowed)) {
     b.disabled = false;
-    out.innerHTML = `<div class="muted">زاویه‌ها از جستجوی گوگل خوانده می‌شوند؛ بدون اجازه دسترسی به آن نشان داده نمی‌شوند.</div>`;
+    out.innerHTML = `<div class="muted">این پیشنهادها از جستجوی گوگل خوانده می‌شوند؛ بدون اجازه دسترسی به آن نشان داده نمی‌شوند.</div>`;
     return;
   }
   const words = b.dataset.gangles.split(/\s+/).filter(Boolean);
@@ -667,7 +745,7 @@ main.addEventListener("click", async (e) => {
     if (angles.length) break;
   }
   newsUsed("angles", globalCategory);
-  out.innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای نام‌های این سوژه زاویه‌ای پیشنهاد نمی‌دهد.</div>`;
+  out.innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای نام‌های این سوژه جستجوی مرتبطی پیشنهاد نمی‌دهد.</div>`;
   b.hidden = true;
 });
 
@@ -722,10 +800,14 @@ async function showGlobal(id) {
   const all = newsGlobal(res.data.stories, prefs, globalShowDismissed);
   // the server's order is «بیشترین منبع»; a sort that leaves two stories equal keeps it between them
   const stories = (prefs.globalHideSeen ? all.filter((s) => !s.covers?.length && !s.ours?.length) : all).sort(sort.by);
+  setExport("رسانه‌های خارجی", ["تیتر", "تعداد منبع", "اولین منبع", "اولین انتشار", "در رسانه فارسی", "وضعیت تیم", "لینک", "ترجمه", "منابع"], stories.map((s) => [
+    s.title, s.sources ?? 0, s.items?.[0]?.source ?? "", csvTime(s.firstAt), s.ours?.length ? "در سایت شما" : s.covers?.length ? "دیده شد" : "",
+    s.mark?.status === "taken" ? `می‌نویسد: ${s.mark.by || "یکی از اعضا"}` : s.mark?.status === "dismissed" ? "رد شده" : "",
+    s.items?.[0]?.url ?? "", s.items?.[0] ? translateUrl(s.items[0].url) : "", (s.items ?? []).map((i) => i.source).join(", ")]));
   list.innerHTML = staleNote(res.data) +
-    `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minSources)} رسانه خارجی گفته‌اند. «در رسانه فارسی دیده شد» یعنی نام‌های لاتین سوژه (شرکت، محصول) در تیتر یک رسانه فارسی هست؛ سوژه بدون این برچسب هم ممکن است به فارسی کار شده باشد، پس پیش از نوشتن بررسی کنید.</p>` +
+    `<details class="about muted"><summary>سوژه‌هایی که دست‌کم ${fa(res.data.minSources)} رسانه خارجی گفته‌اند. <u>بیشتر</u></summary>«در رسانه فارسی دیده شد» یعنی نام‌های لاتین سوژه (شرکت، محصول) در تیتر یک رسانه فارسی هست؛ سوژه بدون این برچسب هم ممکن است به فارسی کار شده باشد، پس پیش از نوشتن بررسی کنید.</details>` +
     (stories.length ? stories.map((s) => globalCard(s, res.data.now, res.data.risingHours)).join("")
-      : `<div class="empty">${all.length ? "همه سوژه‌های این بازه در رسانه‌های فارسی دیده شده‌اند." : "در این بازه سوژه‌ای با این تعداد منبع نیست."}</div>`);
+      : `<div class="empty">${all.length ? "همه سوژه‌های این بازه در رسانه‌های فارسی دیده شده‌اند." : emptyText(prefs, "در این بازه سوژه‌ای با این تعداد منبع نیست.")}</div>`);
 }
 
 // «۲ ساعت و ۵ دقیقه»
@@ -747,7 +829,7 @@ async function showMine(id) {
   pendingCheck = null;
   const sites = state?.sites ?? [];
   if (!sites.length) {
-    main.innerHTML = `<div class="center"><p>هنوز سایتی انتخاب نشده است.</p></div>`;
+    main.innerHTML = gapGuide(null, true);
     return;
   }
   const site = sites.find((s) => s.id === gapSite) ?? sites[0];
@@ -771,7 +853,7 @@ async function showMine(id) {
     runCheck(check, document.getElementById("checkout"));
   }
   const list = document.getElementById("list");
-  if (!site.hasFeed) { list.innerHTML = `<div class="empty">فید سایت شما ثبت نشده است.</div>`; return; }
+  if (!site.hasFeed) { list.innerHTML = gapGuide(site, true); return; }
   const res = await newsApi(`mine?siteId=${site.id}&hours=24`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
@@ -783,6 +865,8 @@ async function showMine(id) {
     ? `در ${fa(covered.length)} خبر که رقبا هم کار کردند، ${fa(covered.length - late.length)} بار اول شما بودید` +
       (late.length ? `؛ بقیه به‌طور میانه ${duration(late.map((i) => i.lagMinutes).sort((a, b) => a - b)[Math.floor(late.length / 2)])} دیرتر.` : ".")
     : "";
+  setExport(`مطالب ما ${site.domain}`, ["تیتر", "زمان انتشار", "دقیقه بعد از اولین رقیب", "اولین رقیب", "تعداد رقبایی که زده‌اند", "لینک"],
+    items.map((i) => [i.title, csvTime(i.at), i.lagMinutes ?? "", i.firstCompetitor ?? "", i.competitors ?? 0, i.url]));
   list.innerHTML = staleNote(res.data) + `<p class="muted">خبرهای ۲۴ ساعت اخیر ${esc(res.data.site)}. ${summary}</p>` + (items.length ? items.map((i, n) => `<article class="card">
       <h3><a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a></h3>
       <div class="meta">${lagBadge(i)} <span>${ago(i.at, res.data.now)}</span>
@@ -875,7 +959,7 @@ function modeBar(modes, current, pick, extra = "") {
 }
 
 // The suggestions as links, each without base, the phrase they were asked for: «گنو پتریاشویلی خداحافظی» → «خداحافظی»
-function angleChips(angles, base, heading = "زاویه‌ها (مخاطب این‌ها را هم جستجو می‌کند)") {
+function angleChips(angles, base, heading = "مردم این‌ها را هم جستجو می‌کنند") {
   const short = (s) => s.replace(base, "").trim() || s;
   return `<div class="sub">${heading}</div><div class="chips">${angles.map((s) =>
     `<a class="chip" href="https://www.google.com/search?q=${encodeURIComponent(s)}&hl=fa" target="_blank" rel="noopener" title="${esc(s)}">${esc(short(s))}</a>`).join("")}</div>`;
@@ -883,7 +967,7 @@ function angleChips(angles, base, heading = "زاویه‌ها (مخاطب ای�
 
 // Google's autocomplete for a phrase: what readers search along with it, i.e. the angles worth writing.
 // Google Search is not filtered in Iran, so it is read directly. The host permission is optional (a new required one
-// would disable the extension on update until the user approves it): asked on the first «زاویه‌ها» click.
+// would disable the extension on update until the user approves it): asked on the first «مردم چه می‌پرسند؟» click.
 const SUGGEST_ORIGIN = "https://suggestqueries.google.com/*";
 async function suggestions(q) {
   try {
@@ -899,19 +983,130 @@ async function showTrends(id) {
   const data = await freeApi(id, "google", "ترندهای گوگل");
   if (!data) return;
   const items = data.trends ?? [];
-  // the brief for the team; «زاویه‌ها» adds the angles to it
+  // the brief for the team; «مردم چه می‌پرسند؟» adds the angles to it
   const brief = (t) => [`ترند گوگل: ${t.title}${t.traffic ? ` (${t.traffic} جستجو)` : ""}`,
     ...(t.news ?? []).slice(0, 3).map((x) => `خبر: ${x.title} ${x.url}`)].join("\n");
-  main.innerHTML = `<p class="muted">جستجوهای داغ امروز گوگل در ایران، با خبرهایی که گوگل به هرکدام وصل کرده. «زاویه‌ها» چیزهایی است که مخاطب همراه آن جستجو می‌کند؛ هرکدام می‌تواند تیتر یا میان‌تیتر یک مطلب باشد.</p>` +
+  setExport("ترند گوگل", ["ترند", "جستجو", "جستجو در گوگل", "خبرهای مرتبط"], items.map((t) =>
+    [t.title, t.traffic ?? "", `https://www.google.com/search?q=${encodeURIComponent(t.title)}&hl=fa`, (t.news ?? []).map((x) => `${x.title} ${x.url}`).join(" | ")]));
+  main.innerHTML = `<p class="muted">جستجوهای داغ امروز گوگل در ایران، با خبرهایی که گوگل به هرکدام وصل کرده. «مردم چه می‌پرسند؟» چیزهایی را می‌آورد که مخاطب همراه آن جستجو می‌کند؛ هرکدام می‌تواند تیتر یا میان‌تیتر یک مطلب باشد.</p>` +
     (items.length ? items.map((t) => `<article class="card">
       <h3><a href="https://www.google.com/search?q=${encodeURIComponent(t.title)}&hl=fa" target="_blank" rel="noopener">${esc(t.title)}</a></h3>
       <div class="meta">${t.traffic ? `<span class="badge">${esc(t.traffic)} جستجو</span>` : ""}
         <a href="${newsUrl(t.title)}" target="_blank" rel="noopener">خبرهای فارسی</a>
-        <button class="btn ghost small" type="button" data-angles="${esc(t.title)}" title="آنچه مخاطب همراه این ترند جستجو می‌کند">زاویه‌ها</button>
+        <button class="btn ghost small" type="button" data-angles="${esc(t.title)}" title="آنچه مخاطب همراه این ترند جستجو می‌کند">مردم چه می‌پرسند؟</button>
         <button class="btn ghost small" type="button" data-copy="${esc(brief(t))}" data-trend="1" title="کپی بریف برای تحریریه">کپی بریف</button></div>
       ${t.news?.length ? `<div class="sub">خبرهای مرتبط</div><ul class="muted" style="margin:0;padding-inline-start:16px">${t.news.map((x) => `<li><a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`).join("")}</ul>` : ""}
       <div class="angles"></div>
     </article>`).join("") : `<div class="empty">ترندی نیست.</div>`);
+}
+
+// «کلمات پرجستجو» (with the module): what readers search about a subject, like the panel's «کلمات کلیدی پرجستجو» but
+// for a newsroom: the questions and the informational searches first. The phrases are Google's autocomplete for the
+// subject alone and with each question or informational word before or after it, read in this browser (as the panel's
+// tool does: Google blocks a server that asks this often); their monthly searches are JetSEO's (api/News/keywords).
+const KW_ASK = ["چیست", "چرا", "چگونه", "چطور", "کی", "کجا", "چقدر", "چند", "آیا", "کدام"];
+const KW_INFO_ASK = ["علت", "معنی", "ماجرای", "زمان", "نتیجه", "آموزش", "تفاوت", "امروز"];
+// how a phrase found is told apart (whole words of the folded phrase)
+const KW_QUESTION = new Set([...KW_ASK, "چیه", "چطوری", "چه", "کیست", "کیه", "کجاست", "چندمه", "چنده", "مگر"].map(newsFold));
+const KW_INFO = new Set([...KW_INFO_ASK, "دلیل", "یعنی", "ماجرا", "جزئیات", "تاریخ", "ساعت", "نتایج", "خبر", "اخبار", "آخرین", "جدید", "نحوه", "روش", "راهنمای", "فرق", "زندگینامه", "بیوگرافی", "خلاصه"].map(newsFold));
+const KW_TYPES = { question: "پرسشی", info: "اطلاعاتی", other: "سایر" };
+// the last search, kept while the app is open: coming back to the list does not ask Google again
+let kwSeed = "", kwRows = null, kwMode = "focus", kwNote = "";
+
+// Google's suggestions for the subject and its question and informational forms, four requests at a time (a burst of
+// thirty earns Google's «unusual traffic» page). Only phrases that hold every word of the subject, at most 300.
+async function keywordIdeas(seed, progress) {
+  const queries = [seed, ...KW_ASK.flatMap((w) => [`${w} ${seed}`, `${seed} ${w}`]), ...KW_INFO_ASK.map((w) => `${w} ${seed}`)];
+  const found = new Set([seed]);
+  for (let i = 0; i < queries.length; i += 4) {
+    for (const s of (await Promise.all(queries.slice(i, i + 4).map(suggestions))).flat()) found.add(s.trim());
+    progress(Math.min(i + 4, queries.length), queries.length);
+  }
+  const words = newsFold(seed).split(" ");
+  return [...found].filter((s) => { const folded = ` ${newsFold(s)} `; return words.every((w) => folded.includes(` ${w} `)); }).slice(0, 300);
+}
+
+function keywordType(phrase, informational) {
+  const words = newsFold(phrase).split(" ");
+  return words.some((w) => KW_QUESTION.has(w)) ? "question" : informational || words.some((w) => KW_INFO.has(w)) ? "info" : "other";
+}
+
+async function showKeywords(id) {
+  main.innerHTML = `<p class="muted">موضوع، نام یا رویدادی را بنویسید (مثل «یارانه» یا «لیگ برتر») تا ببینید مخاطب درباره آن چه می‌پرسد و هر عبارت در ماه چند بار در گوگل جستجو می‌شود. عبارت‌های پرسشی و اطلاعاتی همان‌هایی‌اند که یک خبر، گزارش یا «هرآنچه باید بدانید» جوابشان را می‌دهد.</p>
+    <p class="muted" id="kwperm" hidden>بار اول، کروم یک پنجره اجازه نشان می‌دهد (<span dir="ltr">suggestqueries.google.com</span>): فقط برای خواندن پیشنهادهای جستجوی گوگل است. «Allow» را بزنید.</p>
+    <form id="kwform" class="controls">
+      <input id="kwq" type="search" placeholder="موضوع یا کلمه" aria-label="موضوع یا کلمه" value="${esc(kwSeed)}" maxlength="80" required style="flex:1;min-width:120px" />
+      <button class="btn" type="submit">جستجو</button>
+      <div class="seg" id="kwmode" role="group" aria-label="نوع عبارت">${Object.entries({ focus: "پرسشی و اطلاعاتی", all: "همه" }).map(([v, t]) =>
+        `<button type="button" data-mode="${v}" class="${v === kwMode ? "on" : ""}" aria-pressed="${v === kwMode}">${t}</button>`).join("")}</div>
+    </form>
+    <div id="list"></div>`;
+  const list = document.getElementById("list");
+  // Chrome's permission prompt is in English and names a host the user never heard of: said beforehand, until granted
+  chrome.permissions.contains({ origins: [SUGGEST_ORIGIN] }).then((granted) => {
+    const note = document.getElementById("kwperm");
+    if (note) note.hidden = granted;
+  }).catch(() => {});
+  const render = () => {
+    const shown = kwRows.filter((r) => kwMode === "all" || r.type !== "other");
+    setExport(`کلمات پرجستجو ${kwSeed}`, ["عبارت", "نوع", "جستجوی ماهانه"], shown.map((r) => [r.keyword, KW_TYPES[r.type], r.volume ?? ""]));
+    list.innerHTML = kwNote + (shown.length ? `<p class="muted">${fa(shown.length)} عبارت از ${fa(kwRows.length)} عبارتی که گوگل برای «${esc(kwSeed)}» پیشنهاد می‌دهد، پرجستجوترین اول. «—» یعنی جت‌سئو هنوز حجم جستجوی آن عبارت را ندارد (عبارت تازه یا کم‌جستجو).</p>
+      <section class="card"><table class="kw"><thead><tr><th>عبارت</th><th>نوع</th><th class="num">جستجوی ماهانه</th><th aria-label="خبرهای این عبارت"></th></tr></thead><tbody>${shown.map((r) => `<tr>
+        <td><a href="https://www.google.com/search?q=${encodeURIComponent(r.keyword)}&hl=fa" target="_blank" rel="noopener" dir="auto">${esc(r.keyword)}</a></td>
+        <td><span class="badge ${r.type === "question" ? "watch" : r.type === "info" ? "tg" : ""}">${KW_TYPES[r.type]}</span></td>
+        <td class="num">${r.volume == null ? "—" : fa(r.volume)}</td>
+        <td><a href="${newsUrl(r.keyword)}" target="_blank" rel="noopener">خبرها</a></td></tr>`).join("")}</tbody></table></section>`
+      : `<div class="empty">${kwRows.length ? `برای «${esc(kwSeed)}» عبارت پرسشی یا اطلاعاتی پیدا نشد؛ «همه» را ببینید.` : `گوگل برای «${esc(kwSeed)}» عبارتی پیشنهاد نمی‌دهد. املای آن را بررسی کنید یا کلمه کوتاه‌تر و کلی‌تری بنویسید.`}</div>`);
+  };
+  document.getElementById("kwmode").onclick = (e) => {
+    const b = e.target.closest("button[data-mode]");
+    if (!b || b.dataset.mode === kwMode) return;
+    kwMode = b.dataset.mode;
+    for (const x of e.currentTarget.children) { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", String(x === b)); }
+    if (kwRows) render();
+  };
+  document.getElementById("kwform").onsubmit = async (e) => {
+    e.preventDefault();
+    const seed = document.getElementById("kwq").value.replace(/\s+/g, " ").trim();
+    // at least a letter or digit: punctuation alone folds to nothing, which every phrase «holds»
+    if (newsFold(seed).length < 2) return;
+    // in the submit's user gesture, before anything is awaited; true at once when already granted
+    const allowed = chrome.permissions.request({ origins: [SUGGEST_ORIGIN] }).catch(() => false);
+    const button = e.target.querySelector("button[type=submit]");
+    button.disabled = true;
+    setExport(null);
+    if (!(await allowed)) {
+      button.disabled = false;
+      list.innerHTML = `<div class="empty">عبارت‌ها از پیشنهادهای جستجوی گوگل خوانده می‌شوند؛ بدون اجازه دسترسی به آن نشان داده نمی‌شوند.</div>`;
+      return;
+    }
+    document.getElementById("kwperm").hidden = true;
+    list.innerHTML = `<div class="empty" id="kwwait" aria-live="off">در حال خواندن پیشنهادهای گوگل…</div>`;
+    const ideas = await keywordIdeas(seed, (done, all) => {
+      const wait = document.getElementById("kwwait");
+      if (wait && id === loadId) wait.textContent = `در حال خواندن پیشنهادهای گوگل… ${fa(done)} از ${fa(all)}`;
+    });
+    // the seed alone is always there: more than it means Google answered
+    const res = ideas.length > 1 ? await newsApi("keywords", "POST", ideas) : { status: 200, data: { keywords: [] } };
+    if (res.status === 401) return signedOut();
+    // a search left behind (another list is open now) must not load the app again over it
+    if (res.status === 403) {
+      if (id === loadId) start();
+      return;
+    }
+    const known = new Map((res.data?.keywords ?? []).map((k) => [k.keyword, k]));
+    kwSeed = seed;
+    // an older server has no api/News/keywords: the phrases still show, without their searches
+    kwNote = res.status === 200 ? "" : `<div class="stale">حجم جستجوی عبارت‌ها از سرور جت‌سئو خوانده نشد؛ فهرست بدون آن نمایش داده می‌شود. کمی بعد دوباره جستجو کنید.</div>`;
+    kwRows = (ideas.length > 1 ? ideas : []).map((keyword) => ({ keyword, volume: known.get(keyword)?.volume ?? null, type: keywordType(keyword, known.get(keyword)?.informational) }))
+      // the most searched first; a phrase without a known volume after those with one, questions before the rest
+      .sort((a, b) => (b.volume ?? -1) - (a.volume ?? -1) || (a.type === "question" ? 0 : 1) - (b.type === "question" ? 0 : 1));
+    // the view was drawn again while Google answered (⟳, or away and back): it draws once more, with these rows
+    if (id !== loadId) { if (tab === "keywords") show("keywords"); return; }
+    button.disabled = false;
+    render();
+  };
+  if (kwRows) render();
 }
 
 // «رو به رشد»: read at least twice as much as the day before and the week before; «ویرایش داغ»: articles several people
@@ -935,6 +1130,7 @@ async function showWiki(id) {
     const items = data.items ?? [];
     const date = new Date(data.day).toLocaleDateString("fa-IR", { timeZone: "UTC" });
     const enLink = (article) => `https://en.wikipedia.org/wiki/${encodeURIComponent(article)}`;
+    setExport("ویکی‌پدیا انگلیسی بدون فارسی", ["مقاله", "بازدید", "لینک"], items.map((a) => [a.article.replace(/_/g, " "), a.views, enLink(a.article)]));
     list.innerHTML = `<p class="muted">پربازدیدترین مقاله‌های ویکی‌پدیای انگلیسی در ${esc(date)} که مقاله فارسی ندارند: فیلم، آدم یا رویدادی که دنیا درباره‌اش می‌خواند و هنوز به فارسی نیامده است.</p>` +
       (items.length ? items.map((a) => `<article class="card">
       <h3 dir="ltr" lang="en" style="text-align:left"><a href="${enLink(a.article)}" target="_blank" rel="noopener">${esc(a.article.replace(/_/g, " "))}</a></h3>
@@ -944,6 +1140,7 @@ async function showWiki(id) {
     </article>`).join("") : `<div class="empty">همه مقاله‌های پربازدید انگلیسی این روز، مقاله فارسی دارند.</div>`);
   } else if (mode === "edits") {
     const edits = data.edits ?? [];
+    setExport("ویکی‌پدیا ویرایش داغ", ["مقاله", "ویرایشگر", "ویرایش", "لینک"], edits.map((p) => [p.title, p.editors, p.edits, wikiLink(p.title)]));
     list.innerHTML = `<p class="muted">مقاله‌هایی از ویکی‌پدیای فارسی که در ۳ ساعت اخیر چند نفر ویرایششان کرده‌اند (بدون ربات‌ها).</p>` +
       (edits.length ? edits.map((p) => `<article class="card">
       <h3><a href="${wikiLink(p.title)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
@@ -953,6 +1150,8 @@ async function showWiki(id) {
   } else {
     const items = data.items ?? [];
     const date = new Date(data.day).toLocaleDateString("fa-IR", { timeZone: "UTC" });
+    setExport(mode === "top" ? "ویکی‌پدیا پربازدیدترین" : "ویکی‌پدیا رو به رشد", ["مقاله", "بازدید", "بازدید روز قبل یا هفته قبل", "لینک"],
+      items.map((a) => [a.article.replace(/_/g, " "), a.views, a.base ?? "", wikiLink(a.article)]));
     list.innerHTML = `<p class="muted">${mode === "top" ? "پربازدیدترین" : "مقاله‌هایی از ویکی‌پدیای فارسی که بازدیدشان دست‌کم دو برابر دیروز و هفته پیش شده،"} در ${esc(date)}.</p>` +
       (items.length ? items.map((a) => {
         const title = a.article.replace(/_/g, " ");
@@ -979,6 +1178,9 @@ async function showDays(id) {
   const row = (e) => `<li>${esc(e.what)} <span class="muted">· ${label[e.section] ?? ""} · ${e.ago % 5 ? `${fa(e.ago)} سال پیش` : `<b>${fa(e.ago)}امین سالگرد</b>`}</span></li>`;
   const entries = data.entries ?? [];
   const card = (title, body) => body ? `<section class="card"><h3>${title}</h3><ul style="margin:0;padding-inline-start:16px">${body}</ul></section>` : "";
+  setExport(`مناسبت‌ها ${data.solar ?? ""}`, ["مناسبت", "نوع", "چند سال پیش"], [
+    ...(data.occasions ?? []).map((o) => [o, "مناسبت جهانی", ""]),
+    ...[...entries].sort((a, b) => (a.ago % 5 ? 1 : 0) - (b.ago % 5 ? 1 : 0)).map((e) => [e.what, label[e.section] ?? "", e.ago])]);
   list.innerHTML = `<p class="muted">${esc(data.solar)} (${esc(data.gregorian)}) از ویکی‌پدیای فارسی:
       <a href="${wikiLink(data.solar)}" target="_blank" rel="noopener">${esc(data.solar)}</a> و <a href="${wikiLink(data.gregorian)}" target="_blank" rel="noopener">${esc(data.gregorian)}</a></p>` +
     card("سالگردهای رُند", entries.filter((e) => e.ago % 5 === 0).map(row).join("")) +
@@ -1004,18 +1206,24 @@ async function showTelegram(id) {
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
   if (mode === "trend") {
     const posts = (res.data.posts ?? []).filter((p) => !prefs.muted.includes(String(p.domain ?? "").toLowerCase()))
-      .map((p) => (!p.watch && newsWatched(p.title, prefs) ? { ...p, watch: true } : p));
+      .map((p) => (!p.watch && newsWatched(p.title, prefs) ? { ...p, watch: true } : p))
+      .filter((p) => !newsFocused(prefs) || p.watch);
+    setExport("ترند تلگرام", ["پست", "کانال", "بازدید", "بازدید در ساعت", "برابر معمول کانال", "زمان", "لینک"],
+      posts.map((p) => [p.title, p.channel, p.views, p.perHour, p.relative, csvTime(p.at), p.url]));
     list.innerHTML = staleNote(res.data) + `<p class="muted">پست‌هایی که بازدیدشان از معمولِ همان کانال تندتر بالا می‌رود.</p>` + (posts.length ? posts.map((p) => `<article class="card">
       <h3><a href="${safeUrl(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
       <div class="meta"><span class="badge late">${fa(p.relative)} برابر معمول کانال</span><span class="badge">${fa(p.perHour)} بازدید در ساعت</span>
         ${p.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : ""}
         <span>${esc(p.channel)} · ${fa(p.views)} بازدید · ${ago(p.at, res.data.now)}</span></div>
-    </article>`).join("") : `<div class="empty">هنوز پستی دو بار خوانده نشده است؛ چند دقیقه بعد دوباره ببینید.</div>`);
+    </article>`).join("") : `<div class="empty">${emptyText(prefs, "هنوز پستی دو بار خوانده نشده است؛ چند دقیقه بعد دوباره ببینید.")}</div>`);
     return;
   }
   const stories = newsPersonal(res.data.stories, prefs);
-  list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minChannels)} کانال تلگرام گفته‌اند و هنوز هیچ سایتی نه.</p>` +
-    (stories.length ? stories.map((s) => storyCard(s, res.data.now)).join("") : `<div class="empty">در این بازه سوژه‌ای فقط در تلگرام نیست.</div>`);
+  setExport("فقط در تلگرام", STORY_HEADER, stories.map((s) => storyRow(s)));
+  // the owner asks for the channels of the team's field in the panel («سایت و رقبا»); JetSEO adds them after a look
+  const own = state?.access?.role === "owner" ? ` <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=sites")}" target="_blank" rel="noopener">پیشنهاد کانال تلگرام حوزه خودتان در پنل</a>` : "";
+  list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minChannels)} کانال تلگرام گفته‌اند و هنوز هیچ سایتی نه.${own}</p>` +
+    (stories.length ? stories.map((s) => storyCard(s, res.data.now)).join("") : `<div class="empty">${emptyText(prefs, "در این بازه سوژه‌ای فقط در تلگرام نیست.")}</div>`);
 }
 
 // «چندرسانه‌ای» (with the module): the server keeps no media type, so an item's is read from its headline's marker,
@@ -1073,17 +1281,19 @@ async function showMedia(id) {
   }));
   if (mode === "chance") {
     const open = stories.filter((s) => s.sources >= MEDIA_CHANCE_SITES && !s.media.length);
+    setExport("چندرسانه‌ای فرصت", STORY_HEADER, open.map((s) => storyRow(s)));
     list.innerHTML = `<p class="muted">سوژه‌هایی که دست‌کم ${fa(MEDIA_CHANCE_SITES)} سایت کار کرده‌اند و در تیترهایشان هنوز ویدئو، عکس، اینفوگرافیک یا صوتی نیست.</p>` +
-      (open.length ? open.map((s) => storyCard(s, now)).join("") : `<div class="empty">در این بازه سوژه پرمنبعی بی‌چندرسانه‌ای نیست.</div>`);
+      (open.length ? open.map((s) => storyCard(s, now)).join("") : `<div class="empty">${emptyText(prefs, "در این بازه سوژه پرمنبعی بی‌چندرسانه‌ای نیست.")}</div>`);
     return;
   }
   const made = stories.filter((s) => s.media.length).sort((a, b) => b.media.length - a.media.length || b.sources - a.sources);
+  setExport("چندرسانه‌ای کار شده", [...STORY_HEADER, "چندرسانه‌ای‌ها"], made.map((s) => storyRow(s, [s.media.map((i) => `${MEDIA_KINDS[i.kind]}: ${i.source} ${i.url}`).join(" | ")])));
   const badges = (media) => Object.entries(media.reduce((n, i) => ({ ...n, [i.kind]: (n[i.kind] ?? 0) + 1 }), {}))
     .map(([kind, c]) => `<span class="badge media">${MEDIA_KINDS[kind]} ${fa(c)}</span>`).join("");
   const rows = (media) => `<ul class="list">${media.map((i) => `<li><span class="badge media">${MEDIA_KINDS[i.kind]}</span>
     <a href="${safeUrl(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a> <span class="muted">${esc(i.source)} · ${ago(i.at, now)}</span></li>`).join("")}</ul>`;
   list.innerHTML = `<p class="muted">سوژه‌هایی که رسانه‌ها برایشان ویدئو، عکس، اینفوگرافیک یا صوت منتشر کرده‌اند (از روی تیتر و آدرس هر مطلب).</p>` +
-    (made.length ? made.map((s) => storyCard(s, now, { meta: badges(s.media), body: rows(s.media) })).join("") : `<div class="empty">در این بازه مطلب چندرسانه‌ای پیدا نشد.</div>`);
+    (made.length ? made.map((s) => storyCard(s, now, { meta: badges(s.media), body: rows(s.media) })).join("") : `<div class="empty">${emptyText(prefs, "در این بازه مطلب چندرسانه‌ای پیدا نشد.")}</div>`);
 }
 
 // «کپی برای پیام‌رسان»: a story as plain text for the team's Telegram or Bale group.
@@ -1104,7 +1314,7 @@ main.addEventListener("click", async (e) => {
   setTimeout(() => { b.textContent = label; }, 2000);
 });
 
-// «زاویه‌ها» of a story: Google's suggestions for its trend, or for its headline cut shorter until Google knows it
+// «مردم چه می‌پرسند؟» of a story: Google's suggestions for its trend, or for its headline cut shorter until Google knows it
 // (a whole headline rarely has any). Asked only on the click: a list of stories would be a burst of requests.
 main.addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-angles]");
@@ -1116,8 +1326,8 @@ main.addEventListener("click", async (e) => {
   b.textContent = "در حال یافتن…";
   if (!(await allowed)) {
     b.disabled = false;
-    b.textContent = "زاویه‌ها";
-    card.querySelector(".angles").innerHTML = `<div class="muted">زاویه‌ها از جستجوی گوگل خوانده می‌شوند؛ بدون اجازه دسترسی به آن نشان داده نمی‌شوند.</div>`;
+    b.textContent = "مردم چه می‌پرسند؟";
+    card.querySelector(".angles").innerHTML = `<div class="muted">این پیشنهادها از جستجوی گوگل خوانده می‌شوند؛ بدون اجازه دسترسی به آن نشان داده نمی‌شوند.</div>`;
     return;
   }
   const words = b.dataset.angles.split(/\s+/).filter(Boolean);
@@ -1126,11 +1336,11 @@ main.addEventListener("click", async (e) => {
     angles = await suggestions(q);
     if (angles.length) break;
   }
-  card.querySelector(".angles").innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای این سوژه زاویه‌ای پیشنهاد نمی‌دهد.</div>`;
+  card.querySelector(".angles").innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای این سوژه جستجوی مرتبطی پیشنهاد نمی‌دهد.</div>`;
   b.hidden = true;
   // «کپی» now carries the angles too
   const copy = card.querySelector("button[data-copy]");
-  if (angles.length) copy.dataset.copy += `\nزاویه‌ها:\n${angles.map((s) => `- ${s}`).join("\n")}`;
+  if (angles.length) copy.dataset.copy += `\nمردم این‌ها را هم جستجو می‌کنند:\n${angles.map((s) => `- ${s}`).join("\n")}`;
 });
 
 // «رد شد» on a gap story: gone from the list and the alerts, with a way back until the list is drawn again.
@@ -1163,6 +1373,13 @@ main.addEventListener("click", async (e) => {
 // «چه چیزی تازه است»: once after an update, what the new version added, until «فهمیدم». Shown to someone who used an
 // earlier version (the background has run before: newsSeen), not on a first install.
 const WHATS_NEW = {
+  "0.9.0": [
+    "«کلمات پرجستجو» در بخش ترندها: یک موضوع بنویسید و ببینید مخاطب درباره آن چه می‌پرسد و هر عبارت در ماه چند بار جستجو می‌شود؛ پرسشی‌ها و اطلاعاتی‌ها اول.",
+    "دکمه ⬇ بالای صفحه، فهرستی را که می‌بینید (سوژه‌ها، شکاف پوشش، ترندها، کلمات پرجستجو و …) به صورت فایل CSV ذخیره می‌کند که در اکسل باز می‌شود.",
+    "«فقط سوژه‌های کلیدواژه‌های من» در ⚙ تنظیمات: موضوع‌هایی را که دنبال می‌کنید بنویسید تا همه فهرست‌های سوژه فقط همان‌ها را نشان دهند.",
+    "نام چند دکمه روشن‌تر شد: «برداشتم» حالا «من می‌نویسم» است، «آزاد شد» شده «منصرف شدم» و «زاویه‌ها» شده «مردم چه می‌پرسند؟». راهنمای همه برچسب‌ها در ⚙ تنظیمات است.",
+    "صاحب اشتراک می‌تواند در پنل جت‌سئو (سایت و رقبا) کانال‌های تلگرام حوزه خودش را هم، مثل سایت‌ها، به عنوان منبع پیشنهاد دهد.",
+  ],
   "0.8.0": [
     "بخش‌ها چهار تا شدند: امروز، سوژه‌ها، ترندها و سایت ما. فهرست‌های هر بخش زیر آن است و تنظیمات به ⚙ بالای صفحه رفت.",
     "«رسانه‌های خارجی» در بخش سوژه‌ها: سوژه‌های داغ رسانه‌های انگلیسی‌زبان، با لینک خبر و ترجمه گوگل.",
@@ -1195,8 +1412,10 @@ async function showSettings() {
       <p class="muted" style="margin:0">فقط برای خودتان. فیلترهای تیم (برای همه اعضا) در پنل جت‌سئو هستند${owner ? `: <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=filters")}" target="_blank" rel="noopener">فیلترهای تیم</a>` : ""}.</p>
       <label for="excluded">کلمات مستثنی (با ویرگول جدا شوند؛ فقط کلمه کامل)</label>
       <textarea id="excluded">${esc(prefs.excluded.join("، "))}</textarea>
-      <label for="watch">کلیدواژه‌های تحت نظر من (با ویرگول؛ فقط کلمه کامل). کنار کلیدواژه‌های تیم، برچسب و هشدار می‌گیرند. کلمه لاتین (مثل <span dir="ltr">OpenAI</span>) در سوژه‌های خارجی تب <span dir="ltr">Global</span> هم هشدار می‌دهد.</label>
+      <label for="watch">کلیدواژه‌های تحت نظر من (با ویرگول؛ فقط کلمه کامل). کنار کلیدواژه‌های تیم، برچسب و هشدار می‌گیرند. کلمه لاتین (مثل <span dir="ltr">OpenAI</span>) در سوژه‌های خارجی «رسانه‌های خارجی» هم هشدار می‌دهد.</label>
       <textarea id="watch">${esc(prefs.watch.join("، "))}</textarea>
+      <label class="row"><input type="checkbox" id="watchOnly" ${prefs.watchOnly ? "checked" : ""}/> فقط سوژه‌های همین کلیدواژه‌ها را نشان بده</label>
+      <p class="muted" style="margin:0">با این تیک، داشبورد، سوژه‌های داغ، شکاف پوشش، تلگرام، چندرسانه‌ای و رسانه‌های خارجی فقط سوژه‌هایی را می‌آورند که یکی از کلیدواژه‌های شما (یا تیم) در تیترشان هست؛ هشدار شکاف پوشش هم فقط برای همان‌ها می‌آید. ترندها و «مطالب ما» تغییر نمی‌کنند. بدون کلیدواژه، این تیک اثری ندارد.</p>
       <label for="muted">منابع بی‌صدا (دامنه، با ویرگول)</label>
       <textarea id="muted" dir="ltr">${esc(prefs.muted.join(", "))}</textarea>
       ${offeredTopics().length > 1 ? `<fieldset class="topics-pick"><legend>موضوع‌های من (میز شما در تحریریه؛ هیچ = همه${state.teamTopics?.length ? " موضوع‌های تیم" : ""})</legend>
@@ -1216,11 +1435,26 @@ async function showSettings() {
       <p class="muted" style="margin:0">هر ۵ دقیقه بررسی می‌شود، تا وقتی کروم باز است.</p>
     </section>
     <section class="card">
+      <h3>راهنمای برچسب‌ها و دکمه‌ها</h3>
+      <ul class="list legend-list">
+        <li><span class="badge">۵ منبع</span> چند سایت این سوژه را منتشر کرده‌اند.</li>
+        <li><span class="badge new">۳ منبع تازه</span> سایت‌هایی که در یک ساعت اخیر به این سوژه پیوسته‌اند؛ یعنی سوژه در حال داغ شدن است.</li>
+        <li><span class="badge new">جدید</span> از آخرین باری که فهرست را دیدید اضافه شده است.</li>
+        <li><span class="badge watch">کلیدواژه تحت نظر</span> یکی از کلمه‌هایی که شما یا تیم دنبال می‌کنید در تیتر هست.</li>
+        <li><span class="badge ok">در سایت شما</span> سایت خودتان این سوژه را منتشر کرده است.</li>
+        <li><span class="badge tg">اول در تلگرام</span> کانال‌های تلگرام زودتر از سایت‌ها این خبر را گفته‌اند.</li>
+        <li><span class="badge tg">می‌نویسد: نام</span> یکی از اعضای تیم «من می‌نویسم» را زده و روی این سوژه کار می‌کند.</li>
+        <li><b>من می‌نویسم</b> به تیم می‌گوید این سوژه با شماست تا دو نفر یک خبر را ننویسند؛ <b>منصرف شدم</b> آن را آزاد می‌کند.</li>
+        <li><b>مردم چه می‌پرسند؟</b> (زیر ⋯) چیزهایی که مخاطب همراه این سوژه در گوگل جستجو می‌کند؛ ایده تیتر و میان‌تیتر.</li>
+        <li><b>⬇ اکسل</b> (بالای صفحه) فهرستی را که می‌بینید به صورت فایل ذخیره می‌کند.</li>
+      </ul>
+    </section>
+    <section class="card">
       <h3>میانبرها</h3>
       <p class="muted" style="margin:0">باز کردن جت‌سئو نیوز: <kbd id="shortcut">Alt+Shift+N</kbd> (<a href="#" id="shortcuts">تغییر</a>).
         روی صفحه یا لینکِ خبرهای سایت خودتان راست‌کلیک کنید: «بررسی سئوی این خبر».</p>
     </section>
-    <button class="btn" id="save" type="button">ذخیره</button> <span id="saved" class="muted" hidden>ذخیره شد.</span>`;
+    <div class="savebar"><button class="btn" id="save" type="button">ذخیره تنظیمات</button> <span id="saved" class="muted" role="status" hidden>ذخیره شد.</span></div>`;
   // the shortcut actually set: the user may have changed it, and Chrome leaves the suggested one unset on a conflict
   chrome.commands.getAll().then((commands) => {
     document.getElementById("shortcut").textContent = commands.find((c) => c.name === "_execute_action")?.shortcut || "تعریف نشده";
@@ -1232,6 +1466,7 @@ async function showSettings() {
     await saveNewsPrefs({
       excluded: list("excluded"),
       watch: list("watch"),
+      watchOnly: document.getElementById("watchOnly").checked,
       muted: list("muted").map((d) => d.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")),
       ...(offeredTopics().length > 1 ? { topics: [...document.querySelectorAll("input[name=topic]:checked")].map((c) => c.value) } : {}),
       notifyGap: document.getElementById("notifyGap").checked,
@@ -1240,7 +1475,9 @@ async function showSettings() {
     });
     hiddenTabs = (await newsPrefs()).hiddenTabs;
     renderNav();
-    document.getElementById("saved").hidden = false;
+    const saved = document.getElementById("saved");
+    saved.hidden = false;
+    setTimeout(() => { saved.hidden = true; }, 3000);
   };
 }
 
@@ -1260,5 +1497,7 @@ chrome.action.getBadgeText({}).then((text) => {
 start();
 // not while the user types in a field: the redraw would take the focus
 setInterval(() => {
-  if (state?.access && ["dash", "topics", "gap"].includes(tab) && !document.activeElement?.matches("input, textarea, select")) show(tab);
+  // nor while the answers of «مردم چه می‌پرسند؟» or a «⋯» menu are open on a card: the redraw would take them away
+  if (state?.access && ["dash", "topics", "gap"].includes(tab) && !document.activeElement?.matches("input, textarea, select")
+    && !main.querySelector(".angles:not(:empty), details.menu[open]")) show(tab);
 }, 3 * 60 * 1000);

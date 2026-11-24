@@ -127,7 +127,7 @@ async function poll(first) {
     }
   }
 
-  // and in a story of the foreign media («Global»): a Latin word, «openai», matches the English headlines as it is
+  // and in a story of the foreign media («رسانه‌های خارجی»): a Latin word, «openai», matches the English headlines as it is
   if (state.data.foreignNews) {
     const res = await newsApi("foreign?hours=6");
     for (const story of res.status === 200 ? newsGlobal(res.data.stories, prefs).filter((s) => s.watch) : []) {

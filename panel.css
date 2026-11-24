@@ -95,6 +95,13 @@ ul.list li.ours { list-style: "★ " }
 .btn { display: inline-block; border: 0; border-radius: 8px; padding: 6px 14px; background: #f97316; color: #fff; text-decoration: none; cursor: pointer }
 .btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line) }
 .empty { text-align: center; color: var(--muted); padding: 24px 8px }
+/* «کلمات پرجستجو»: phrase, kind, monthly searches */
+.kw { width: 100%; border-collapse: collapse }
+.kw th, .kw td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top }
+.kw tr:last-child td { border-bottom: 0 }
+.kw th { font-size: 12px; color: var(--muted); font-weight: 400 }
+.kw .num { text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums }
+.kw td:last-child { white-space: nowrap; font-size: 12px }
 .center { text-align: center; padding: 28px 12px }
 .center p { margin: 0 0 14px }
 label.row { display: flex; gap: 8px; align-items: center; margin: 6px 0 }
@@ -138,6 +145,14 @@ details.menu > summary::-webkit-details-marker { display: none }
 .guide li.done b { color: var(--ok) }
 /* «چه چیزی تازه است», once after an update */
 #whatsnew { margin: 10px 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--brand-soft); border: 1px solid var(--line) }
+#export { width: auto; padding-inline: 8px; white-space: nowrap; font: inherit }
+details.about { margin: 0 0 10px }
+details.about summary { cursor: pointer; list-style: none }
+.legend-list li { margin: 4px 0 }
+/* the save button stays in sight on the long settings page */
+.savebar { position: sticky; inset-block-end: 0; padding: 8px 0; background: var(--bg) }
+#focus { margin: 10px 10px 0; padding: 6px 12px; border-radius: 10px; background: var(--brand-soft); border: 1px solid var(--line); overflow-wrap: anywhere }
+body.page #focus { max-width: 1200px; margin: 12px auto 0 }
 #whatsnew ul { margin: 6px 0 8px; padding-inline-start: 18px }
 body.page #whatsnew { max-width: 1200px; margin: 12px auto 0 }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); margin-top: 6px }
