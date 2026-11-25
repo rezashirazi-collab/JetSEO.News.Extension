@@ -117,4 +117,32 @@ assert.ok(storyPrompt({ title: "Nvidia", sources: 2, items: [{ source: "Reuters"
   assert.strictEqual(box.html, "");
 }
 
-console.log("ok");
+// The clicked notification's stories (panel.js showTold … refreshTold): no «من می‌نویسم» from the mark the background
+// saw, only from the story as the server has it now; a foreign notification asks only the foreign list.
+(async () => {
+  const text = panel.replace(/\r\n/g, "\n");
+  const asked = [];
+  const lists = { "topics?hours=3&minSources=1": [{ id: 1, title: "a", mark: { status: "taken", by: "همکار" } }], "gap?siteId=7&hours=6": [{ id: 2, title: "b", mark: null }] };
+  const box = { hidden: true, innerHTML: "", scrollIntoView() {} };
+  const ctx = vm.createContext({
+    toldBox: box, esc: String, NEWS_WATCH_PATHS: api.NEWS_WATCH_PATHS, NEWS_FOREIGN_WATCH_PATH: api.NEWS_FOREIGN_WATCH_PATH, takenBadge: () => "", state: { access: {}, sites: [{ id: 7, hasFeed: true, competitors: 2 }, { id: 8 }] },
+    newsPrefs: async () => ({ hours: 6 }),
+    newsApi: async (p) => (asked.push(p), lists[p] ? { status: 200, data: { stories: lists[p] } } : { status: 500 }),
+    // a row: the story's id, and «+» when it would carry the button
+    dashStory: (s) => `${s.id}${"mark" in s && s.mark?.status !== "taken" ? "+" : ""},`,
+  });
+  vm.runInContext(text.slice(text.indexOf("let toldGo = null;"), text.indexOf('toldBox.addEventListener("click", (e) => {\n  if (!e.target.closest("#told-close")')) + "this.out = { showTold, refreshTold };", ctx);
+  const rows = () => box.innerHTML.match(/<ul class="need">(.*)<\/ul>/)[1];
+  const stale = [1, 2, 3].map((id) => ({ id, title: "t", mark: null }));
+  ctx.out.showTold({ tab: "dash", title: "t", stories: stale });
+  assert.strictEqual(rows(), "1,2,3,");
+  await new Promise((done) => setTimeout(done, 10));
+  // 1 was taken since, 2 is still free, 3 is on no list any more
+  assert.strictEqual(rows(), "1,2+,3,");
+  assert.ok(asked.includes("gap?siteId=7&hours=6") && !asked.some((p) => p.includes("siteId=8") || p.startsWith("foreign")));
+  asked.length = 0;
+  ctx.out.showTold({ tab: "global", title: "t", stories: stale });
+  await new Promise((done) => setTimeout(done, 10));
+  assert.deepStrictEqual(asked, ["foreign?hours=6"]);
+  console.log("ok");
+})().catch((error) => { console.error(error); process.exit(1); });
