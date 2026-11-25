@@ -172,7 +172,7 @@ const TAB_NAMES = {
 const GROUPS = [
   { key: "today", name: "امروز", tabs: ["dash"] },
   { key: "stories", name: "سوژه‌ها", tabs: ["topics", "gap", "telegram", "media", "global"] },
-  { key: "trends", name: "ترندها", tabs: ["trends", "keywords", "wiki", "days"] },
+  { key: "trends", name: "ترندها", tabs: ["trends", "wiki", "days", "keywords"] },
   { key: "site", name: "سایت ما", tabs: ["mine"] },
 ];
 const subtabsNav = document.getElementById("subtabs");
@@ -1051,7 +1051,18 @@ async function showKeywords(id) {
     const shown = kwRows.filter((r) => kwMode === "all" || r.type !== "other");
     setExport(`کلمات پرجستجو ${kwSeed}`, ["عبارت", "نوع", "جستجوی ماهانه"], shown.map((r) => [r.keyword, KW_TYPES[r.type], r.volume ?? ""]));
     list.innerHTML = kwNote + (shown.length ? `<p class="muted">${fa(shown.length)} عبارت از ${fa(kwRows.length)} عبارتی که گوگل برای «${esc(kwSeed)}» پیشنهاد می‌دهد، پرجستجوترین اول. «—» یعنی جت‌سئو هنوز حجم جستجوی آن عبارت را ندارد (عبارت تازه یا کم‌جستجو).</p>
+// Google answers some subjects only when written as one word («زنبورعسل», nothing for «زنبور عسل»): a subject of
+// several words that finds fewer than KW_FEW phrases is asked again joined, and both answers are shown.
+const KW_FEW = 10;
       <section class="card"><table class="kw"><thead><tr><th>عبارت</th><th>نوع</th><th class="num">جستجوی ماهانه</th><th aria-label="خبرهای این عبارت"></th></tr></thead><tbody>${shown.map((r) => `<tr>
+  const ideas = await keywordIdeasOf(seed, progress);
+  const joined = seed.replace(/ /g, "");
+  if (ideas.length >= KW_FEW || joined === seed) return ideas;
+  // without the joined subject itself: the caller reads «more than the seed» as «Google answered»
+  return [...new Set([...ideas, ...(await keywordIdeasOf(joined, progress)).filter((s) => s !== joined)])].slice(0, 300);
+}
+
+async function keywordIdeasOf(seed, progress) {
         <td><a href="https://www.google.com/search?q=${encodeURIComponent(r.keyword)}&hl=fa" target="_blank" rel="noopener" dir="auto">${esc(r.keyword)}</a></td>
         <td><span class="badge ${r.type === "question" ? "watch" : r.type === "info" ? "tg" : ""}">${KW_TYPES[r.type]}</span></td>
         <td class="num">${r.volume == null ? "—" : fa(r.volume)}</td>
