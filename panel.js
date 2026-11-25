@@ -164,7 +164,7 @@ function showTold(go) {
 const unmarked = ({ mark, ...story }) => story;
 function drawTold(stories, now) {
   toldBox.innerHTML = `<section class="card"><h3 class="head"><span>اعلان: ${esc(toldGo.title)}</span><a href="#" id="told-close">بستن</a></h3>
-    <ul class="need">${stories.map((s) => dashStory(s, `${takenBadge(s, now)}${s.ours ? `<span class="badge ok">در سایت شما</span>` : ""}`)).join("")}</ul></section>`;
+    <ul class="need">${stories.map((s) => dashStory(s, `${takenBadge(s, now)}${newsOnOurSite(s) ? `<span class="badge ok">در سایت شما</span>` : ""}`)).join("")}</ul></section>`;
 }
 // The rows were read when the notification was told, maybe an hour before its click, and api/News/mark overwrites: «من
 // می‌نویسم» on a story a colleague took since would take it from them. So a row gets its button only from the story as
@@ -602,7 +602,7 @@ async function showDash(id) {
     .filter((s) => s.mark?.status === "taken");
   // «معطل»: taken that long ago and still on none of the team's sites; those first, the longest wait on top
   const waited = (s) => Math.max(0, Math.round((Date.parse(now) - Date.parse(s.mark.at)) / 60000)) || 0;
-  const stalled = (s) => !s.ours && waited(s) >= STALLED_MINUTES;
+  const stalled = (s) => !newsOnOurSite(s) && waited(s) >= STALLED_MINUTES;
   taken.sort((x, y) => stalled(y) - stalled(x) || waited(y) - waited(x));
   const stalledCount = taken.filter(stalled).length;
   // «پوشش به تفکیک میز»: of each topic's hot stories, how many a team's site has; the desk furthest behind first
@@ -673,7 +673,7 @@ async function showDash(id) {
     rankShown.length > 1 ? `رتبه پوشش بین رسانه‌ها: ${rankShown.map((r) => `${fa(r.place)}. ${r.ours ? "ما" : r.name} (${fa(r.covered)}${firstText(r)})`).join("، ")}` : "",
     gaps ? `شکاف پوشش باز:${fa(gaps.length)}${gaps.slice(0, 5).map((s) => `\n- ${s.title} (رقبا: ${(s.competitors ?? []).join("، ")})`).join("")}` : "",
     first + late.length ? `سرعت انتشار (۲۴ ساعت): اول ما ${fa(first)}، بعد از رقبا ${fa(late.length)}${late.length ? `، تأخیر میانه ${duration(median)}` : ""}` : "",
-    taken.length ? `در دست تیم:${taken.map((s) => `\n- ${s.mark.by || "یکی از اعضا"}: ${s.title}${s.ours ? " (منتشر شد)" : stalled(s) ? ` (${duration(waited(s))}، هنوز منتشر نشده)` : ""}`).join("")}` : "",
+    taken.length ? `در دست تیم:${taken.map((s) => `\n- ${s.mark.by || "یکی از اعضا"}: ${s.title}${newsOnOurSite(s) ? " (منتشر شد)" : stalled(s) ? ` (${duration(waited(s))}، هنوز منتشر نشده)` : ""}`).join("")}` : "",
     needStories.length ? `بی‌صاحب (${fa(needStories.length)}):${needStories.slice(0, 5).map((s) => `\n- ${s.title}`).join("")}` : "",
   ].filter(Boolean).join("\n") : "";
 
@@ -695,7 +695,7 @@ async function showDash(id) {
   (rank?.rows ?? []).forEach((r, n) => add("مقایسه با رسانه‌های دیگر", r.ours ? "ما" : r.name, r.covered, `رتبه ${n + 1} · از ${hot.length} سوژه${r.first == null ? "" : ` · ${r.first} بار اول`}`));
   if (desks.length > 1) desks.forEach((d) => add("پوشش به تفکیک میز", d.name, d.ours, `از ${d.all}`));
   needStories.forEach((s) => add("الان باید دید", s.title, s.sources || s.channels || "", s.firstSource ?? "", s.items?.[0]?.url ?? ""));
-  taken.forEach((s) => add("تیم الان چه می‌نویسد", s.title, s.mark.by || "یکی از اعضا", s.ours ? "منتشر شد" : stalled(s) ? `${duration(waited(s))}، هنوز منتشر نشده` : "", s.items?.[0]?.url ?? ""));
+  taken.forEach((s) => add("تیم الان چه می‌نویسد", s.title, s.mark.by || "یکی از اعضا", newsOnOurSite(s) ? "منتشر شد" : stalled(s) ? `${duration(waited(s))}، هنوز منتشر نشده` : "", s.items?.[0]?.url ?? ""));
   (gaps ?? []).forEach((s) => add("شکاف پوشش", s.title, s.sources ?? "", `رقبا: ${(s.competitors ?? []).join("، ")}`, s.items?.[0]?.url ?? ""));
   (trends ?? []).forEach((t) => add("ترند گوگل", t.title, t.traffic ?? ""));
   setExport("داشبورد", ["بخش", "عنوان", "مقدار", "توضیح", "لینک"], sheet);
@@ -711,7 +711,7 @@ async function showDash(id) {
       : wait("topics", "gap", "tg") ? SKELETON
       : (hot || gaps) && `<p class="muted" style="margin:0">سوژه‌ای منتظر شما نیست: نه کلیدواژه تحت نظر، نه شکاف پوشش و نه سوژه رو به رشدی که کسی برنداشته باشد.</p>`) +
     section(`تیم الان چه می‌نویسد${stalledCount ? ` <span class="badge late">${fa(stalledCount)} معطل</span>` : ""}`, "", taken.length && `<ul class="need">${taken.map((s) =>
-      dashStory(s, `${takenBadge(s, now)}${s.ours ? `<span class="badge ok">در سایت شما</span>`
+      dashStory(s, `${takenBadge(s, now)}${newsOnOurSite(s) ? `<span class="badge ok">در سایت شما</span>`
         : stalled(s) ? `<span class="badge late" title="«من می‌نویسم» زده شده و هنوز روی هیچ‌کدام از سایت‌های تیم نیامده است">${duration(waited(s))}، هنوز منتشر نشده</span>` : ""}`)).join("")}</ul>`) +
     // a desk's row opens the stories it has not told yet (openDesks keeps it open across the redraws)
     section("پوشش به تفکیک میز", "topics", desks.length > 1 && `<div class="bars">${desks.map((d) => {
@@ -1772,8 +1772,12 @@ main.addEventListener("click", async (e) => {
 // earlier version (the background has run before: newsSeen), not on a first install.
 const WHATS_NEW = {
   "0.9.0": [
-    "«کلمات پرجستجو» در بخش ترندها: یک موضوع بنویسید و ببینید مخاطب درباره آن چه می‌پرسد و هر عبارت در ماه چند بار جستجو می‌شود؛ پرسشی‌ها و اطلاعاتی‌ها اول.",
-    "دکمه ⬇ بالای صفحه، فهرستی را که می‌بینید (سوژه‌ها، شکاف پوشش، ترندها، کلمات پرجستجو و …) به صورت فایل CSV ذخیره می‌کند که در اکسل باز می‌شود.",
+    "«کلمات پرجستجو» بخش تازه‌ای است: یک موضوع بنویسید و ببینید مخاطب درباره آن چه می‌پرسد و هر عبارت در ماه چند بار جستجو می‌شود؛ پرسشی‌ها و اطلاعاتی‌ها اول.",
+    "«پرامپت» روی هر سوژه متنی آماده برای دستیار هوش مصنوعی کپی می‌کند: خواندن منابع، سه تیتر، لید و متن خبر. بعد از کپی، همان را برای پست تلگرام، تیتر دیسکاور یا پرسش و پاسخ هم می‌دهد.",
+    "داشبورد کامل‌تر شد: «الان باید دید»، «تیم الان چه می‌نویسد»، پوشش به تفکیک میز و «مقایسه با رسانه‌های دیگر». «کپی گزارش شیفت» همه را به صورت متن برای گروه تحریریه کپی می‌کند.",
+    "دکمه «⬇ اکسل» بالای صفحه، فهرستی را که می‌بینید (داشبورد، سوژه‌ها، شکاف پوشش، ترندها، کلمات پرجستجو و …) به صورت فایل CSV ذخیره می‌کند که در اکسل باز می‌شود.",
+    "«بازه» برای داشبورد و همه فهرست‌های سوژه یکی شد، و در صفحه کامل همه فهرست‌ها در یک ستون کنار صفحه‌اند.",
+    "کلیک روی هر اعلان، سوژه‌های همان اعلان را بالای فهرست نشان می‌دهد.",
     "«فقط سوژه‌های کلیدواژه‌های من» در ⚙ تنظیمات: موضوع‌هایی را که دنبال می‌کنید بنویسید تا همه فهرست‌های سوژه فقط همان‌ها را نشان دهند.",
     "نام چند دکمه روشن‌تر شد: «برداشتم» حالا «من می‌نویسم» است، «آزاد شد» شده «منصرف شدم» و «زاویه‌ها» شده «مردم چه می‌پرسند؟». راهنمای همه برچسب‌ها در ⚙ تنظیمات است.",
     "صاحب اشتراک می‌تواند در پنل جت‌سئو (سایت و رقبا) کانال‌های تلگرام حوزه خودش را هم، مثل سایت‌ها، به عنوان منبع پیشنهاد دهد.",

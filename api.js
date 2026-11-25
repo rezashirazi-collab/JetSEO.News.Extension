@@ -186,6 +186,12 @@ function newsPersonal(stories, prefs) {
     .filter((s) => !newsFocused(prefs) || s.watch);
 }
 
+// One of the team's sites tells the story. s.ours is true or false on a Persian story and, on a foreign one, the Persian
+// headlines found for it on the team's sites: a list, empty when there are none (and an empty list is truthy).
+function newsOnOurSite(s) {
+  return Array.isArray(s.ours) ? s.ours.length > 0 : !!s.ours;
+}
+
 const newsHost = (domain) => String(domain ?? "").toLowerCase().replace(/^www\./, "");
 
 // «مقایسه با رسانه‌های دیگر»: of the hot stories, how many each site told and how many it told first (among the sites; a
