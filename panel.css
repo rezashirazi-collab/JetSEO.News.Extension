@@ -175,3 +175,20 @@ body.page .dash-grid { columns: 360px; column-gap: 10px }
 body.page .dash-grid .card { margin: 0 0 10px; break-inside: avoid }
 body.page .bar { height: 10px }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px }
+/* The full page's menu: every list in one column beside the content, the sections as headings (panel.js renderNav). The
+   side panel keeps its two rows: it has no width to spare. The outer columns centre the 1232px of menu and content. */
+body.page { display: grid; grid-template-columns: max(0px, calc((100% - 1232px) / 2)) 190px minmax(0, 1fr) max(0px, calc((100% - 1232px) / 2)); align-items: start }
+body.page > * { grid-column: 3 }
+body.page > .top { grid-column: 1 / -1 }
+body.page > .tabs.side { grid-column: 2; grid-row: 2 / span 6; position: sticky; top: 58px; max-height: calc(100vh - 58px); flex-direction: column; gap: 2px; padding: 16px 0; padding-inline-start: 16px; overflow: hidden auto; background: none; border: 0 }
+.tabs.side h4 { margin: 12px 10px 2px; font-size: 11.5px; font-weight: 400; color: var(--muted) }
+.tabs.side button { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; text-align: start }
+.tabs.side button:hover { background: var(--card) }
+body.page #focus, body.page #whatsnew, body.page #banner { max-width: none; margin: 12px 16px 0 }
+body.page main { max-width: none; margin: 0 }
+/* a narrow window: the menu goes back over the content, wrapping */
+@media (max-width: 760px) {
+  body.page { display: block }
+  body.page > .tabs.side { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px 16px }
+  .tabs.side h4 { margin: 0 4px }
+}

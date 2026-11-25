@@ -163,7 +163,8 @@ function signedOut() {
   };
 }
 
-// The lists, in five sections: the top row is the sections, the second the lists of the open one (hidden when it has
+// The lists, in five sections. In the side panel the top row is the sections and the second the lists of the open one;
+// the full page shows them all in one column (renderNav). The second row is hidden when the section has
 // one). «تنظیمات» is the header's gear, not a list.
 const TAB_NAMES = {
   dash: "داشبورد", topics: "سوژه‌های داغ", gap: "شکاف پوشش", telegram: "تلگرام", media: "چندرسانه‌ای", global: "رسانه‌های خارجی",
@@ -193,11 +194,20 @@ function tabAvailable(name) {
 }
 
 function renderNav() {
-  const groups = state ? GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter(tabAvailable) })).filter((g) => g.tabs.length) : [];
+  const groups = state ? GROUPS.map((g) => ({ ...g, alone: g.tabs.length === 1, tabs: g.tabs.filter(tabAvailable) })).filter((g) => g.tabs.length) : [];
   const open = groups.find((g) => g.tabs.includes(tab));
   tabsNav.hidden = !groups.length;
   settingsButton.hidden = !state;
   settingsButton.classList.toggle("on", tab === "settings");
+  // The full page has the width for every list at once: one column beside the content, the sections as headings, each
+  // list one click away. A section of one list is that one button, under the section's name.
+  if (pageView === "tab") {
+    subtabsNav.hidden = true;
+    tabsNav.innerHTML = groups.map((g) => (g.alone ? "" : `<h4>${g.name}</h4>`) + g.tabs.map((t) =>
+      `<button type="button" data-tab="${t}" class="${t === tab ? "on" : ""}" aria-pressed="${t === tab}"><span>${g.alone ? g.name : TAB_NAMES[t]}</span>${
+        t === "gap" && gapBadge ? `<span class="count" title="شکاف پوشش دیده‌نشده">${fa(gapBadge)}</span>` : ""}</button>`).join("")).join("");
+    return;
+  }
   tabsNav.innerHTML = groups.map((g) => `<button type="button" data-group="${g.key}" class="${g === open ? "on" : ""}" aria-pressed="${g === open}">${g.name}${
     g.key === "stories" && gapBadge ? ` <span class="count" title="شکاف پوشش دیده‌نشده">${fa(gapBadge)}</span>` : ""}</button>`).join("");
   subtabsNav.hidden = !open || open.tabs.length < 2;
@@ -282,6 +292,9 @@ const storyRow = (s, more = []) => [
 ];
 
 tabsNav.addEventListener("click", (e) => {
+  // the full page's column has the lists themselves
+  const list = e.target.closest("button[data-tab]");
+  if (list) return show(list.dataset.tab);
   const group = GROUPS.find((g) => g.key === e.target.closest("button[data-group]")?.dataset.group);
   if (!group) return;
   const open = group.tabs.filter(tabAvailable);
@@ -298,6 +311,7 @@ document.getElementById("refresh").onclick = () => start();
 // other view and keeps it as the icon's default.
 const pageView = new URLSearchParams(location.search).get("view") === "tab" ? "tab" : "panel";
 document.body.classList.toggle("page", pageView === "tab");
+tabsNav.classList.toggle("side", pageView === "tab");
 for (const b of document.querySelectorAll("#view button")) {
   b.classList.toggle("on", b.dataset.view === pageView);
   b.setAttribute("aria-pressed", b.dataset.view === pageView);
