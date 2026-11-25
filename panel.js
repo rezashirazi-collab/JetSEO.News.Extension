@@ -163,7 +163,7 @@ function signedOut() {
   };
 }
 
-// The lists, in four sections: the top row is the sections, the second the lists of the open one (hidden when it has
+// The lists, in five sections: the top row is the sections, the second the lists of the open one (hidden when it has
 // one). «تنظیمات» is the header's gear, not a list.
 const TAB_NAMES = {
   dash: "داشبورد", topics: "سوژه‌های داغ", gap: "شکاف پوشش", telegram: "تلگرام", media: "چندرسانه‌ای", global: "رسانه‌های خارجی",
@@ -172,7 +172,9 @@ const TAB_NAMES = {
 const GROUPS = [
   { key: "today", name: "امروز", tabs: ["dash"] },
   { key: "stories", name: "سوژه‌ها", tabs: ["topics", "gap", "telegram", "media", "global"] },
-  { key: "trends", name: "ترندها", tabs: ["trends", "wiki", "days", "keywords"] },
+  { key: "trends", name: "ترندها", tabs: ["trends", "wiki", "days"] },
+  // a tool the member types into, not a list of trends: a section of its own, one click from anywhere
+  { key: "keywords", name: "کلمات پرجستجو", tabs: ["keywords"] },
   { key: "site", name: "سایت ما", tabs: ["mine"] },
 ];
 const subtabsNav = document.getElementById("subtabs");
