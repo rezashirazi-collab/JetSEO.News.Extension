@@ -9,6 +9,8 @@ var NEWS_SITE = "https://www.jetseo.ir";
 var NEWS_API = "https://coreapi.jetseo.ir/api/News";
 var NEWS_ACCOUNT_KEY = "newsAccount";
 var NEWS_PREFS_KEY = "newsPrefs";
+// «سوژه بی‌صاحب» is told when a gap or a watched story stayed free this long (background.js poll; the settings name it)
+var UNCLAIMED_MINUTES = 30;
 
 function newsLoginUrl() {
   return `${NEWS_SITE}/home/login?ReturnUrl=${encodeURIComponent("/extension/connected")}&utm_source=jetseo_news_extension&utm_medium=login`;
@@ -44,7 +46,7 @@ async function newsConnect() {
 
 async function newsSignOut() {
   const account = await newsAccount();
-  await chrome.storage.local.remove([NEWS_ACCOUNT_KEY, "newsSeen", "newsState", "newsTopicSeen", "newsGapSkip"]);
+  await chrome.storage.local.remove([NEWS_ACCOUNT_KEY, "newsSeen", "newsState", "newsTopicSeen", "newsGapSkip", "newsWaiting"]);
   chrome.contextMenus.removeAll(() => chrome.runtime.lastError);
   if (account) {
     // revokes the token on the server; signing out here works even if this fails

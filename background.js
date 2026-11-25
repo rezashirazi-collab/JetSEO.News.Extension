@@ -83,9 +83,6 @@ async function menus(sites) {
   chrome.contextMenus.create({ id: `link|${view}`, title: "بررسی سئوی این لینک (جت‌سئو نیوز)", contexts: ["link"], targetUrlPatterns: patterns }, quiet);
 }
 
-// «سوژه بی‌صاحب» is told when a gap or a watched story stayed free this long
-const UNCLAIMED_MINUTES = 30;
-
 // first: right after sign-in, when everything already there counts as seen (no flood of old stories).
 async function poll(first) {
   const state = await newsApi("state");
@@ -105,10 +102,10 @@ async function poll(first) {
   const watchSeen = new Set(newsSeen.watch);
   const newGaps = [];
   let unseenGaps = 0;
-  // for «سوژه بی‌صاحب»: the gaps and the watched stories nobody took and no team's site has, by story id. Only from a
-  // server that sends the team's marks: without them every story would look free.
+  // for «سوژه بی‌صاحب»: the gaps and the watched stories with no mark of the team (neither taken nor dismissed) that no
+  // team's site has, by story id. Only from a server that sends the team's marks: without them every story would look free.
   const open = new Map();
-  const free = (story) => { if ("mark" in story && story.mark?.status !== "taken" && !story.ours) open.set(String(story.id), story); };
+  const free = (story) => { if ("mark" in story && !story.mark && !story.ours) open.set(String(story.id), story); };
 
   for (const site of state.data.sites ?? []) {
     if (!site.hasFeed || !site.competitors) continue;

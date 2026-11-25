@@ -146,6 +146,8 @@ async function takeGo() {
 
 function signedOut() {
   state = null;
+  // another account may sign in to this panel: it must not see the last one's dashboard
+  dashCache.clear();
   renderNav();
   clearList();
   who.textContent = "";
@@ -490,9 +492,10 @@ async function showDash(id) {
   const gapS = pick((s) => s.hasFeed && s.competitors);
   const mineS = pick((s) => s.hasFeed);
   const skipped = await newsSkipped();
+  const account = await newsAccount();
+  // after the last await: a list opened meanwhile must not be drawn over
   if (id !== loadId) return;
-  // another account may sign in to this panel: it must not see the last one's dashboard
-  if (!(await newsAccount())) return dashCache.clear(), signedOut();
+  if (!account) return signedOut();
   // a list switched off in the settings is not asked for
   const paths = {
     topics: a && tabAvailable("topics") && `topics?hours=${prefs.hours}&minSources=${topicMinSources(prefs)}`,
@@ -529,7 +532,8 @@ async function showDash(id) {
   risingMinutes = topics?.risingMinutes ?? risingMinutes;
   const need = [], needStories = [], needIds = new Set();
   const addNeed = (list, ok, badges) => (list || []).forEach((s) => {
-    if (needIds.has(s.id) || s.ours || s.mark?.status === "taken" || !ok(s)) return;
+    // any mark: taken, or dismissed for the team («رد شد» on its gap card)
+    if (needIds.has(s.id) || s.ours || s.mark || !ok(s)) return;
     needIds.add(s.id);
     need.push(dashStory(s, badges(s)));
     needStories.push(s);
@@ -691,7 +695,7 @@ async function showDash(id) {
     draw();
   }));
   // signed out while it loaded (newsApi drops the account on a 401)
-  if (id === loadId && !(await newsAccount())) return dashCache.clear(), signedOut();
+  if (id === loadId && !(await newsAccount())) return signedOut();
 }
 
 // Draws html (a row of elements) into box and leaves alone the elements that are the same as last time: a card that did
@@ -718,12 +722,12 @@ function patch(box, html) {
   for (; at < old.length; at++) old[at].remove();
 }
 
-const tile =(go, value, label, tone = "") => `<button class="tile ${tone}" type="button" data-go="${go}"><b>${value}</b><span>${label}</span></button>`;
+const tile = (go, value, label, tone = "") => `<button class="tile ${tone}" type="button" data-go="${go}"><b>${value}</b><span>${label}</span></button>`;
 const dashSection = (title, go, body) => body ? `<section class="card"><h3 class="head"><span>${title}</span>${go ? `<a href="#" data-go="${go}">همه</a>` : ""}</h3>${body}</section>` : "";
-// A story on the dashboard, one row: the headline, why it is there, how many told it, and «من می‌نویسم» while it is free
-// (the click marks it for the team and draws the dashboard again, where it moves to «تیم الان چه می‌نویسد»).
 // a member's «من می‌نویسم» that old with the story still on none of the team's sites is «معطل» on the dashboard
 const STALLED_MINUTES = 45;
+// A story on the dashboard, one row: the headline, why it is there, how many told it, and «من می‌نویسم» while it is free
+// (the click marks it for the team and draws the dashboard again, where it moves to «تیم الان چه می‌نویسد»).
 const dashStory = (s, badges) => `<li><a dir="auto" title="${esc(s.title)}" href="${safeUrl(s.items?.[0]?.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>${badges}
   <span class="muted">${s.sources ? `${fa(s.sources)} منبع` : s.channels ? `${fa(s.channels)} کانال` : ""}</span>${s.mark?.status === "taken" ? "" : takeButton(s)}</li>`;
 
@@ -1774,7 +1778,7 @@ async function showSettings() {
       <h3>هشدارها</h3>
       <label class="row"><input type="checkbox" id="notifyGap" ${prefs.notifyGap ? "checked" : ""}/> سوژه‌ای که رقبا زده‌اند و ما نه</label>
       <label class="row"><input type="checkbox" id="notifyWatch" ${prefs.notifyWatch ? "checked" : ""}/> سوژه‌ای با کلیدواژه تحت نظر (تیم یا خودم)</label>
-      <label class="row"><input type="checkbox" id="notifyUnclaimed" ${prefs.notifyUnclaimed ?? owner ? "checked" : ""}/> سوژه بی‌صاحب: شکاف پوشش یا کلیدواژه تحت نظری که بعد از ۳۰ دقیقه هنوز کسی «من می‌نویسم» نزده (برای سردبیر و دبیر)</label>
+      <label class="row"><input type="checkbox" id="notifyUnclaimed" ${prefs.notifyUnclaimed ?? owner ? "checked" : ""}/> سوژه بی‌صاحب: شکاف پوشش یا کلیدواژه تحت نظری که بعد از ${fa(UNCLAIMED_MINUTES)} دقیقه هنوز کسی «من می‌نویسم» نزده (برای سردبیر و دبیر)</label>
       <p class="muted" style="margin:0">هر ۵ دقیقه بررسی می‌شود، تا وقتی کروم باز است.</p>
     </section>
     <section class="card">
