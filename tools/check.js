@@ -52,6 +52,8 @@ const hotStories = [
 const rank = api.newsMediaRank(hotStories, ["ours.ir"]);
 assert.strictEqual(JSON.stringify(rank.rows.map((r) => [r.ours ? "ours" : r.name, r.covered, r.first])), '[["a.ir",3,2],["b.ir",2,1],["ours",2,0]]');
 assert.strictEqual(rank.cut, 1);
+// each row carries the stories it told (the dashboard's row opens those the team has not)
+assert.ok(rank.rows.every((r) => r.ours || r.stories.length === r.covered));
 assert.strictEqual(api.newsMediaRank(hotStories, ["other.ir"]).rows.find((r) => r.ours).first, null);
 
 // The story prompts (panel.js, which needs a browser: only the block from NO_ANGLES to addAngles is run here). Each
@@ -81,5 +83,38 @@ for (const kind of Object.keys(PROMPT_KINDS)) {
 assert.ok(storyPrompt({ title: "t", firstSource: "ایسنا", items: [] }, "new").includes("سوژه: t\nاولین: ایسنا\n\n"));
 // a foreign story has no firstSource and may have no Persian headline
 assert.ok(storyPrompt({ title: "Nvidia", sources: 2, items: [{ source: "Reuters", title: "t", url: "https://r.example" }] }, "foreign").includes("اولین: Reuters"));
+
+// patch (panel.js, the dashboard's cards): a card that did not change stays the same element, one that changed is put
+// in anew, and what another tab drew goes. The DOM here is just big enough for it: a box of <section> elements.
+{
+  class El {
+    constructor(html) { this.outerHTML = html; this.parent = null; }
+    get isConnected() { return !!this.parent; }
+    remove() { if (this.parent) { this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; } }
+    before(el) { el.remove(); const p = this.parent; p.children.splice(p.children.indexOf(this), 0, el); el.parent = p; }
+  }
+  class Box {
+    constructor() { this.children = []; }
+    append(el) { el.remove(); this.children.push(el); el.parent = this; }
+    set textContent(v) { this.children.forEach((c) => (c.parent = null)); this.children = []; }
+    get html() { return this.children.map((c) => c.outerHTML).join(""); }
+  }
+  const document = { createElement: () => ({ set innerHTML(h) { const b = new Box(); (h.match(/<section>.*?<\/section>/g) || []).forEach((x) => b.append(new El(x))); this.content = b; } }) };
+  const text = panel.replace(/\r\n/g, "\n"), from = text.indexOf("function patch(box, html)");
+  const patch = new Function("document", text.slice(from, text.indexOf("\n}\n", from) + 3) + ";return patch")(document);
+  const box = new Box(), [A, B, C, B2] = ["a", "b", "c", "b2"].map((x) => `<section>${x}</section>`);
+  box.append(new El("<section>another tab</section>"));
+  patch(box, A + B + C);
+  assert.strictEqual(box.html, A + B + C);
+  const [a, b, c] = box.children;
+  patch(box, A + B2 + C);
+  assert.ok(box.html === A + B2 + C && box.children[0] === a && box.children[1] !== b && box.children[2] === c);
+  patch(box, A + C);
+  assert.ok(box.html === A + C && box.children[1] === c);
+  patch(box, B + A + C + B2);
+  assert.ok(box.html === B + A + C + B2 && box.children[1] === a && box.children[2] === c);
+  patch(box, "");
+  assert.strictEqual(box.html, "");
+}
 
 console.log("ok");

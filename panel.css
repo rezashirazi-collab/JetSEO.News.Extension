@@ -102,6 +102,20 @@ fieldset.topics-pick legend { padding: 0; font-size: 13px }
 .bar-val { color: var(--muted); white-space: nowrap; font-size: 11.5px }
 .bar-row.ours .bar-label { font-weight: 700; color: var(--brand) }
 .bar-row.ours .bar i { background: var(--accent) }
+/* a dashboard card or number whose answer is not here yet */
+.skel { display: block; height: 10px; border-radius: 5px; margin: 8px 0; background: linear-gradient(90deg, var(--line) 25%, color-mix(in srgb, var(--line) 40%, transparent) 50%, var(--line) 75%) 0 0 / 200% 100%; animation: skel 1.2s linear infinite }
+.skel:nth-child(2) { width: 70% }
+.skel:nth-child(3) { width: 45% }
+.skel.n { display: inline-block; width: 28px; height: 14px; margin: 0; vertical-align: middle }
+@keyframes skel { to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+/* a desk's row on «پوشش به تفکیک میز» opens its uncovered stories */
+details.desk summary { margin: 0; list-style: none }
+details.desk summary::-webkit-details-marker { display: none }
+details.desk summary .bar-label::before { content: "‹"; display: inline-block; margin-inline-end: 5px; color: var(--muted); transition: transform .15s }
+details.desk[open] summary .bar-label::before { transform: rotate(-90deg) }
+details.desk summary:hover .bar-label { color: var(--brand) }
+details.desk .need { margin: 6px 0 4px; padding: 6px 8px; border-inline-start: 2px solid var(--line) }
 .stack { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--line); margin: 6px 0 4px }
 .s-ok { background: #16a34a } .s-late { background: #dc2626 } .s-none { background: #9ca3af }
 .legend { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11.5px; color: var(--muted) }

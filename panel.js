@@ -474,29 +474,41 @@ async function markFresh(stories) {
 
 // «داشبورد»: one look at everything, from the same endpoints as the tabs (the module ones only with access). Each part
 // shows on its own, so a source that fails does not hide the rest; its tile shows «—». Tiles and «همه» open the tab.
+// The cards are drawn at once and each fills when its own answer comes (draw runs again per answer, and patch touches
+// only the cards that changed), so the slowest source holds back its own card only.
+// the dashboard's last answers by path, for this panel's lifetime: coming back to it draws them at once, then the fresh ones
+const dashCache = new Map();
+// a card or a number whose answer is not here yet
+const SKELETON = `<div aria-busy="true"><i class="skel"></i><i class="skel"></i><i class="skel"></i></div>`;
+// a section's «همه» tab → the answer it waits for
+const DASH_WAITS = { topics: "topics", gap: "gap", mine: "mine", global: "foreign", trends: "google", wiki: "wiki", days: "days" };
 async function showDash(id) {
-  // the 3-minute refresh keeps the old dashboard until the new one is ready: no flash, no jump to the top
-  if (!main.querySelector(".tiles")) main.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
   const prefs = await newsPrefs();
   const a = state?.access;
   const sites = state?.sites ?? [];
   const pick = (ok) => sites.find((s) => s.id === gapSite && ok(s)) ?? sites.find(ok);
   const gapS = pick((s) => s.hasFeed && s.competitors);
   const mineS = pick((s) => s.hasFeed);
-  const get = (path) => newsApi(path).then((r) => (r.status === 200 ? r.data : null));
-  const [topics, gap, tg, mine, foreign, google, wiki, days] = await Promise.all([
-    // a list switched off in the settings is not asked for
-    a && tabAvailable("topics") && get(`topics?hours=${prefs.hours}&minSources=${topicMinSources(prefs)}`),
-    a && tabAvailable("gap") && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.hours}`),
-    a && tabAvailable("telegram") && get(`telegram?mode=only&hours=${prefs.hours}`),
-    a && tabAvailable("mine") && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
-    a && tabAvailable("global") && state.foreignNews && get(`foreign?hours=${prefs.globalHours}`),
-    get("google"), get("wiki?mode=rising"), get("days?offset=0"),
-  ]);
   const skipped = await newsSkipped();
   if (id !== loadId) return;
-  if (!(await newsAccount())) return signedOut();
-
+  // another account may sign in to this panel: it must not see the last one's dashboard
+  if (!(await newsAccount())) return dashCache.clear(), signedOut();
+  // a list switched off in the settings is not asked for
+  const paths = {
+    topics: a && tabAvailable("topics") && `topics?hours=${prefs.hours}&minSources=${topicMinSources(prefs)}`,
+    gap: a && tabAvailable("gap") && gapS && `gap?siteId=${gapS.id}&hours=${prefs.hours}`,
+    tg: a && tabAvailable("telegram") && `telegram?mode=only&hours=${prefs.hours}`,
+    mine: a && tabAvailable("mine") && mineS && `mine?siteId=${mineS.id}&hours=24`,
+    foreign: a && tabAvailable("global") && state.foreignNews && `foreign?hours=${prefs.globalHours}`,
+    google: "google", wiki: "wiki?mode=rising", days: "days?offset=0",
+  };
+  // the answers by name. undefined: asked and not here yet (and no last answer); null: not asked, or it failed
+  const d = Object.fromEntries(Object.entries(paths).map(([name, path]) => [name, path ? dashCache.get(path) : null]));
+  const wait = (...names) => names.some((name) => d[name] === undefined);
+  // a section that waits for its answer is drawn as a skeleton; one without a «همه» tab, or with skeleton false, is not
+  const section = (title, go, body, skeleton = true) => dashSection(title, go, body || (skeleton && go && wait(DASH_WAITS[go]) && SKELETON));
+  const draw = () => {
+  const { topics, gap, tg, mine, foreign, google, wiki, days } = d;
   const hot = topics ? newsPersonal(topics.stories, prefs) : null;
   const gaps = gap ? newsPersonal(gap.stories, prefs).filter((s) => !skipped.has(`${gapS.id}:${s.id}`)) : null;
   const tgOnly = tg ? newsPersonal(tg.stories, prefs) : null;
@@ -508,7 +520,8 @@ async function showDash(id) {
   const first = mineItems.filter((i) => i.lagMinutes != null && i.lagMinutes <= 0).length;
   const late = mineItems.filter((i) => i.lagMinutes > 0);
   const none = mineItems.length - first - late.length;
-  const count = (list) => (list ? fa(list.length) : "—");
+  const dots = `<i class="skel n"></i>`;
+  const count = (list, name) => (list ? fa(list.length) : wait(name) ? dots : "—");
 
   // «الان باید دید»: the stories that wait for someone, the most pressing first, each once and with why it is here: a
   // watched word, then what the competitors told, then what is heating up. Not those a team's site has or a member took.
@@ -539,9 +552,10 @@ async function showDash(id) {
   // «پوشش به تفکیک میز»: of each topic's hot stories, how many a team's site has; the desk furthest behind first
   const desks = hot && mineS ? Object.values(hot.reduce((d, s) => {
     const name = topicName(s.topic) ?? "سایر";
-    d[name] ??= { name, all: 0, ours: 0 };
+    d[name] ??= { name, all: 0, ours: 0, missing: [] };
     d[name].all++;
     if (s.ours) d[name].ours++;
+    else d[name].missing.push(s);
     return d;
   }, {})).sort((x, y) => (y.all - y.ours) - (x.all - x.ours) || y.all - x.all) : [];
   // how much of what the media tell the team's sites have, and how much is heating up now
@@ -553,21 +567,21 @@ async function showDash(id) {
   const on = (name) => tabAvailable(name);
   const missed = a ? [
     // not set up yet (no site, feed or competitors): the tile says so and opens the three steps
-    on("gap") ? (gapS ? tile("gap", count(gaps), "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : newsFocused(prefs) ? "" : "ok") : tile("gap", "؟", "شکاف پوشش تنظیم نشده؛ راه‌اندازی")) : "",
-    on("global") && state.foreignNews ? tile("global", count(global), `رسانه‌های خارجی (${fa(prefs.globalHours)} ساعت)`) : "",
-    on("telegram") ? tile("telegram", count(tgOnly), "فقط در تلگرام") : "",
+    on("gap") ? (gapS ? tile("gap", count(gaps, "gap"), "رقبا زده‌اند، شما نه", gaps?.length ? "bad" : wait("gap") || newsFocused(prefs) ? "" : "ok") : tile("gap", "؟", "شکاف پوشش تنظیم نشده؛ راه‌اندازی")) : "",
+    on("global") && state.foreignNews ? tile("global", count(global, "foreign"), `رسانه‌های خارجی (${fa(prefs.globalHours)} ساعت)`) : "",
+    on("telegram") ? tile("telegram", count(tgOnly, "tg"), "فقط در تلگرام") : "",
   ].join("") : "";
   const tiles = (a ? [
     // without a site that has a feed nothing can be «در سایت شما»: the plain count then
     on("topics") ? (hot?.length && mineS
       ? tile("topics", `${fa(covered)} از ${fa(hot.length)}`, `سوژه داغ را زده‌اید (${fa(prefs.hours)} ساعت)`)
-      : tile("topics", count(hot), `سوژه داغ (${fa(prefs.hours)} ساعت)`)) : "",
-    on("topics") ? tile("topics", count(heating), `رو به رشد (${fa(risingMinutes)} دقیقه اخیر)`) : "",
-    on("mine") ? tile("mine", mine && first + late.length ? `${fa(Math.round((100 * first) / (first + late.length)))}٪` : "—", "اول منتشر کردید") : "",
+      : tile("topics", count(hot, "topics"), `سوژه داغ (${fa(prefs.hours)} ساعت)`)) : "",
+    on("topics") ? tile("topics", count(heating, "topics"), `رو به رشد (${fa(risingMinutes)} دقیقه اخیر)`) : "",
+    on("mine") ? tile("mine", mine && first + late.length ? `${fa(Math.round((100 * first) / (first + late.length)))}٪` : wait("mine") ? dots : "—", "اول منتشر کردید") : "",
   ] : []).concat([
-    tile("trends", count(trends), "ترند گوگل"),
-    tile("wiki", count(rising), "ویکی رو به رشد"),
-    tile("days", count(round), "سالگرد رُند امروز"),
+    tile("trends", count(trends, "google"), "ترند گوگل"),
+    tile("wiki", count(rising, "wiki"), "ویکی رو به رشد"),
+    tile("days", count(round, "days"), "سالگرد رُند امروز"),
   ]).join("");
 
   // «مقایسه با رسانه‌های دیگر»: the sites by how many of the hot stories each told and how many it told first
@@ -575,9 +589,17 @@ async function showDash(id) {
   const rank = hot?.length ? newsMediaRank(hot, sites.filter((s) => s.hasFeed).map((s) => s.domain)) : null;
   const rankShown = rank ? rank.rows.map((r, n) => ({ ...r, place: n + 1 })).filter((r) => r.place <= 8 || r.ours) : [];
   const firstText = (r) => (r.first == null ? "" : ` · ${fa(r.first)} بار اول`);
-  const rankHtml = rankShown.length > 1 && `<div class="bars">${rankShown.map((r) => `<div class="bar-row${r.ours ? " ours" : ""}">
-      <span class="bar-label">${fa(r.place)}. ${r.ours ? "شما" : esc(r.name)}</span><span class="bar"><i style="width:${Math.max(4, Math.round((100 * r.covered) / hot.length))}%"></i></span>
-      <span class="bar-val"${r.first == null ? ` title="خبرهای سایت شما در فهرست منابع سوژه‌ها نیست؛ سرعت شما در «سرعت انتشار ما» آمده است"` : ""}>${fa(r.covered)} از ${fa(hot.length)}${firstText(r)}</span></div>`).join("")}</div>
+  // a medium's row opens the stories it told and the team's sites did not (the same <details> as the desks' rows)
+  const rankHtml = rankShown.length > 1 && `<div class="bars">${rankShown.map((r) => {
+    const row = `<span class="bar-label">${fa(r.place)}. ${r.ours ? "شما" : esc(r.name)}</span><span class="bar"><i style="width:${Math.max(4, Math.round((100 * r.covered) / hot.length))}%"></i></span>
+      <span class="bar-val"${r.first == null ? ` title="خبرهای سایت شما در فهرست منابع سوژه‌ها نیست؛ سرعت شما در «سرعت انتشار ما» آمده است"` : ""}>${fa(r.covered)} از ${fa(hot.length)}${firstText(r)}</span>`;
+    const missing = r.ours ? [] : r.stories.filter((s) => !s.ours);
+    const key = `rank:${r.name}`;
+    return missing.length ? `<details class="desk" data-desk="${esc(key)}"${openDesks.has(key) ? " open" : ""}>
+      <summary class="bar-row" title="${fa(missing.length)} سوژه که این رسانه زده و شما نه">${row}</summary>
+      <ul class="need">${missing.map((s) => dashStory(s, s.mark?.status === "taken" ? takenBadge(s, now) : "")).join("")}</ul></details>`
+      : `<div class="bar-row${r.ours ? " ours" : ""}">${row}</div>`;
+  }).join("")}</div>
     <p class="muted" style="margin:4px 0 0">از ${fa(hot.length)} سوژه داغ این بازه: چند تا را پوشش داده و چند بار اولین سایت بوده است.${
       rank.cut ? ` در ${fa(rank.cut)} سوژه پرمنبع فقط ۱۲ سایت اول شمرده شده‌اند.` : ""}</p>`;
 
@@ -587,7 +609,8 @@ async function showDash(id) {
     ${late.length ? `<p class="muted" style="margin:4px 0 0">تأخیر میانه: ${duration(median)}</p>` : ""}` : "";
 
   // «کپی گزارش شیفت»: the dashboard as text for the newsroom's group, what an editor hands over at the end of a shift
-  const report = a ? [
+  // not while an answer is still on its way: half a report would be copied
+  const report = a && !wait(...Object.keys(d)) ? [
     `گزارش جت‌سئو نیوز${mineS ? ` · ${mineS.domain}` : ""} · ${new Date(now ?? Date.now()).toLocaleString("fa-IR", { dateStyle: "medium", timeStyle: "short" })}`,
     hot?.length && mineS ? `پوشش سوژه‌های داغ (${fa(prefs.hours)} ساعت اخیر): ${fa(covered)} از ${fa(hot.length)} (${fa(Math.round((100 * covered) / hot.length))}٪)` : "",
     desks.length > 1 ? `به تفکیک میز: ${desks.map((d) => `${d.name} ${fa(d.ours)} از ${fa(d.all)}`).join("، ")}` : "",
@@ -621,19 +644,28 @@ async function showDash(id) {
   (trends ?? []).forEach((t) => add("ترند گوگل", t.title, t.traffic ?? ""));
   setExport("داشبورد", ["بخش", "عنوان", "مقدار", "توضیح", "لینک"], sheet);
 
-  main.innerHTML = staleNote(topics)
+  patch(main, staleNote(topics)
     + (missed ? `<section class="card missed"><h3>جا مانده‌ها</h3><div class="tiles">${missed}</div></section>` : "")
     + `<div class="tiles">${tiles}</div>`
     + (report ? `<p class="dash-acts"><button class="btn ghost small" type="button" data-copy="${esc(report)}" title="وضعیت همین لحظه (پوشش، میزها، شکاف‌ها، سرعت انتشار، کار اعضا) به صورت متن کپی می‌شود تا در گروه تحریریه بگذارید">کپی گزارش شیفت</button></p>` : "")
-    + `<div class="dash-grid">` +
-    section(`الان باید دید${need.length ? ` (${fa(need.length)})` : ""}`, "topics", (hot || gaps) && (need.length ? `<ul class="need">${need.slice(0, 6).join("")}</ul>`
-      : `<p class="muted" style="margin:0">سوژه‌ای منتظر شما نیست: نه کلیدواژه تحت نظر، نه شکاف پوشش و نه سوژه رو به رشدی که کسی برنداشته باشد.</p>`)) +
+    + `<div class="dash-grid"></div>`);
+  patch(main.querySelector(".dash-grid"),
+    // «nothing waits» is said only once all three lists are here
+    section(`الان باید دید${need.length ? ` (${fa(need.length)})` : ""}`, "topics", need.length ? `<ul class="need">${need.slice(0, 6).join("")}</ul>`
+      : wait("topics", "gap", "tg") ? SKELETON
+      : (hot || gaps) && `<p class="muted" style="margin:0">سوژه‌ای منتظر شما نیست: نه کلیدواژه تحت نظر، نه شکاف پوشش و نه سوژه رو به رشدی که کسی برنداشته باشد.</p>`) +
     section(`تیم الان چه می‌نویسد${stalledCount ? ` <span class="badge late">${fa(stalledCount)} معطل</span>` : ""}`, "", taken.length && `<ul class="need">${taken.map((s) =>
       dashStory(s, `${takenBadge(s, now)}${s.ours ? `<span class="badge ok">در سایت شما</span>`
         : stalled(s) ? `<span class="badge late" title="«من می‌نویسم» زده شده و هنوز روی هیچ‌کدام از سایت‌های تیم نیامده است">${duration(waited(s))}، هنوز منتشر نشده</span>` : ""}`)).join("")}</ul>`) +
-    section("پوشش به تفکیک میز", "topics", desks.length > 1 && `<div class="bars">${desks.map((d) => `<div class="bar-row">
-      <span class="bar-label">${esc(d.name)}</span><span class="bar"><i style="width:${Math.round((100 * d.ours) / d.all)}%"></i></span>
-      <span class="bar-val">${fa(d.ours)} از ${fa(d.all)}</span></div>`).join("")}</div>`) +
+    // a desk's row opens the stories it has not told yet (openDesks keeps it open across the redraws)
+    section("پوشش به تفکیک میز", "topics", desks.length > 1 && `<div class="bars">${desks.map((d) => {
+      const row = `<span class="bar-label">${esc(d.name)}</span><span class="bar"><i style="width:${Math.round((100 * d.ours) / d.all)}%"></i></span>
+      <span class="bar-val">${fa(d.ours)} از ${fa(d.all)}</span>`;
+      return d.missing.length ? `<details class="desk" data-desk="${esc(d.name)}"${openDesks.has(d.name) ? " open" : ""}>
+      <summary class="bar-row" title="${fa(d.missing.length)} سوژه پوشش‌داده‌نشده">${row}</summary>
+      <ul class="need">${d.missing.map((s) => dashStory(s, s.mark?.status === "taken" ? takenBadge(s, now) : "")).join("")}</ul></details>`
+        : `<div class="bar-row">${row}</div>`;
+    }).join("")}</div>`, !!mineS) +
     section(`مقایسه با رسانه‌های دیگر (${fa(prefs.hours)} ساعت)`, "topics", rankHtml) +
     section(`سوژه‌های داغ رسانه‌ها`, "topics", hot && bars(hot.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources,
       // beside the count, where the team stands on it: published, or a member writing it
@@ -646,11 +678,48 @@ async function showDash(id) {
     section("ویکی‌پدیا: رو به رشد", "wiki", rising && bars(rising.slice(0, 5).map((x) => ({ label: x.article.replace(/_/g, " "), href: wikiLink(x.article), value: x.ratio, text: `${fa(Math.round(x.ratio))} برابر` })))) +
     section(`مناسبت‌های امروز${days?.solar ? ` (${esc(days.solar)})` : ""}`, "days", days && (round.length || days.occasions?.length) && `<ul class="list">${[
       ...(days.occasions ?? []).slice(0, 3).map((o) => `<li>${esc(o)}</li>`),
-      ...round.slice(0, 4).map((e) => `<li>${esc(e.what)}: <span class="muted"><b>${fa(e.ago)}امین سالگرد</b></span></li>`)].join("")}</ul>`) + `</div>`;
+      ...round.slice(0, 4).map((e) => `<li>${esc(e.what)}: <span class="muted"><b>${fa(e.ago)}امین سالگرد</b></span></li>`)].join("")}</ul>`));
+  };
+
+  draw();
+  await Promise.all(Object.entries(paths).map(async ([name, path]) => {
+    if (!path) return;
+    const r = await newsApi(path);
+    if (id !== loadId) return;
+    d[name] = r.status === 200 ? r.data : null;
+    if (d[name]) dashCache.set(path, d[name]);
+    draw();
+  }));
+  // signed out while it loaded (newsApi drops the account on a 401)
+  if (id === loadId && !(await newsAccount())) return dashCache.clear(), signedOut();
 }
 
-const tile = (go, value, label, tone = "") => `<button class="tile ${tone}" type="button" data-go="${go}"><b>${value}</b><span>${label}</span></button>`;
-const section = (title, go, body) => body ? `<section class="card"><h3 class="head"><span>${title}</span>${go ? `<a href="#" data-go="${go}">همه</a>` : ""}</h3>${body}</section>` : "";
+// Draws html (a row of elements) into box and leaves alone the elements that are the same as last time: a card that did
+// not change keeps its scroll, its hover and its open rows, and nothing flashes. Not keyed: an element is «the same»
+// when its html is, so one that changed is put in anew and the old one goes.
+function patch(box, html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const old = [...box.children];
+  // what another tab drew (or loose text) goes first
+  if (!old.some((el) => el.patched)) box.textContent = "";
+  let at = 0;
+  for (const el of [...template.content.children]) {
+    const mark = el.outerHTML;
+    const same = old.findIndex((o, n) => n >= at && o.patched === mark);
+    if (same < 0) {
+      el.patched = mark;
+      if (old[at]?.isConnected) old[at].before(el); else box.append(el);
+      continue;
+    }
+    for (; at < same; at++) old[at].remove();
+    at++;
+  }
+  for (; at < old.length; at++) old[at].remove();
+}
+
+const tile =(go, value, label, tone = "") => `<button class="tile ${tone}" type="button" data-go="${go}"><b>${value}</b><span>${label}</span></button>`;
+const dashSection = (title, go, body) => body ? `<section class="card"><h3 class="head"><span>${title}</span>${go ? `<a href="#" data-go="${go}">همه</a>` : ""}</h3>${body}</section>` : "";
 // A story on the dashboard, one row: the headline, why it is there, how many told it, and «من می‌نویسم» while it is free
 // (the click marks it for the team and draws the dashboard again, where it moves to «تیم الان چه می‌نویسد»).
 // a member's «من می‌نویسم» that old with the story still on none of the team's sites is «معطل» on the dashboard
@@ -675,6 +744,13 @@ function trafficNumber(text) {
   if (!m) return 0;
   return parseFloat(m[1]) * ({ k: 1e3, هزار: 1e3, m: 1e6, میلیون: 1e6 }[(m[2] ?? "").toLowerCase()] ?? 1);
 }
+
+// the desks opened on «پوشش به تفکیک میز»; toggle does not bubble, hence the capture
+const openDesks = new Set();
+main.addEventListener("toggle", (e) => {
+  const name = e.target.dataset?.desk;
+  if (name) openDesks[e.target.open ? "add" : "delete"](name);
+}, true);
 
 main.addEventListener("click", (e) => {
   const g = e.target.closest("[data-go]");

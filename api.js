@@ -192,7 +192,7 @@ const newsHost = (domain) => String(domain ?? "").toLowerCase().replace(/^www\./
 function newsMediaRank(stories, ownDomains) {
   const own = new Set((ownDomains ?? []).map(newsHost));
   const rows = new Map();
-  const row = (key, name) => rows.get(key) ?? rows.set(key, { name, ours: key === "", covered: 0, first: 0 }).get(key);
+  const row = (key, name) => rows.get(key) ?? rows.set(key, { name, ours: key === "", covered: 0, first: 0, stories: [] }).get(key);
   let ownListed = false, cut = 0;
   for (const s of stories ?? []) {
     if (s.sources > 12) cut++;
@@ -203,6 +203,7 @@ function newsMediaRank(stories, ownDomains) {
       told.add(key);
       const r = row(key, i.source);
       r.covered++;
+      r.stories.push(s);
       if (n === 0) r.first++;
       if (!key) ownListed = true;
     });
