@@ -27,6 +27,9 @@ assert.strictEqual(api.newsFold("آيا «دلارِ» ۱۴۰۵ گران مي‌
 assert.ok(api.newsMatches(api.newsFold("قیمت دلار امروز"), "دلار"));
 assert.ok(!api.newsMatches(api.newsFold("ایرانسل"), "ایران"));
 
+// «در سایت شما»: a foreign story's ours is a list of headlines, and an empty one is not «on our site»
+assert.deepStrictEqual([{ ours: [] }, { ours: [{}] }, { ours: true }, { ours: false }, {}].map(api.newsOnOurSite), [false, true, true, false, false]);
+
 // «فقط کلیدواژه‌های من»: only the stories with a watched word (the user's own, or the server's watch for the team's);
 // off, or with no word of the user's own, every story stays
 const stories = [
@@ -125,7 +128,7 @@ assert.ok(storyPrompt({ title: "Nvidia", sources: 2, items: [{ source: "Reuters"
   const lists = { "topics?hours=3&minSources=1": [{ id: 1, title: "a", mark: { status: "taken", by: "همکار" } }], "gap?siteId=7&hours=6": [{ id: 2, title: "b", mark: null }] };
   const box = { hidden: true, innerHTML: "", scrollIntoView() {} };
   const ctx = vm.createContext({
-    toldBox: box, esc: String, NEWS_WATCH_PATHS: api.NEWS_WATCH_PATHS, NEWS_FOREIGN_WATCH_PATH: api.NEWS_FOREIGN_WATCH_PATH, takenBadge: () => "", state: { access: {}, sites: [{ id: 7, hasFeed: true, competitors: 2 }, { id: 8 }] },
+    toldBox: box, esc: String, newsOnOurSite: api.newsOnOurSite, NEWS_WATCH_PATHS: api.NEWS_WATCH_PATHS, NEWS_FOREIGN_WATCH_PATH: api.NEWS_FOREIGN_WATCH_PATH, takenBadge: () => "", state: { access: {}, sites: [{ id: 7, hasFeed: true, competitors: 2 }, { id: 8 }] },
     newsPrefs: async () => ({ hours: 6 }),
     newsApi: async (p) => (asked.push(p), lists[p] ? { status: 200, data: { stories: lists[p] } } : { status: 500 }),
     // a row: the story's id, and «+» when it would carry the button
