@@ -172,7 +172,7 @@ const TAB_NAMES = {
 const GROUPS = [
   { key: "today", name: "امروز", tabs: ["dash"] },
   { key: "stories", name: "سوژه‌ها", tabs: ["topics", "gap", "telegram", "media", "global"] },
-  { key: "trends", name: "ترندها", tabs: ["trends", "keywords", "wiki", "days"] },
+  { key: "trends", name: "ترندها", tabs: ["trends", "wiki", "days", "keywords"] },
   { key: "site", name: "سایت ما", tabs: ["mine"] },
 ];
 const subtabsNav = document.getElementById("subtabs");
@@ -367,6 +367,11 @@ main.addEventListener("click", (e) => {
 
 // The controls of a list: `primary` always in sight (the period and the order), the rest behind «فیلتر», whose number
 // says how many of them are on. The panel stays open across the list's redraws (a change of a filter draws it again).
+// «بازه»: one period for the Persian story lists (hot stories, coverage gap, Telegram, multimedia) and the dashboard:
+// chosen on any of them, kept for all (prefs.hours; the server takes 1 to 24). «رسانه‌های خارجی» keeps its own, up to 72.
+const hoursHtml = (prefs) => `<label title="برای همه فهرست‌های سوژه و داشبورد یکی است">بازه <select id="hours">${[1, 3, 6, 12, 24].map((h) => `<option value="${h}" ${h === prefs.hours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>`;
+const wireHours = (name) => { document.getElementById("hours").onchange = async (e) => { await saveNewsPrefs({ hours: +e.target.value }); show(name); }; };
+
 const filtersOpen = {};
 function controlsHtml(primary, filters = "", active = 0) {
   const open = !!filtersOpen[tab];
@@ -386,7 +391,7 @@ function wireControls() {
 // One layout for every story card (Persian and foreign), so a list reads at a glance:
 //   the headline, a link to the first source's article (ltr: an English headline);
 //   the count badge, then at most two of `badges` (most important first; the rest go under «جزئیات»);
-//   `meta` (more of the line: who told it first), one main button, and the other actions under «⋯».
+//   `meta` (more of the line: who told it first), then the main button and the other actions (`menu`), all in sight.
 // badges, meta, main and menu are HTML already escaped by the caller.
 function cardShell({ title, url, ltr = false, count, badges = [], meta = "", main: mainButton = "", menu = [], body = "", details = "", className = "" }) {
   const shown = badges.filter(Boolean);
@@ -396,8 +401,7 @@ function cardShell({ title, url, ltr = false, count, badges = [], meta = "", mai
       ${count}
       ${shown.slice(0, 2).join("")}
       ${meta}
-      <span class="acts">${mainButton}
-      ${menu.filter(Boolean).length ? `<details class="menu"><summary aria-label="کارهای دیگر این سوژه" title="کارهای دیگر">⋯</summary><div class="menu-items">${menu.filter(Boolean).join("")}</div></details>` : ""}</span>
+      <span class="acts">${mainButton}${menu.filter(Boolean).join("")}</span>
     </div>
     ${body}
     <div class="angles"></div>
@@ -433,22 +437,14 @@ function storyCard(s, now, extra = {}) {
     meta: `<span>اولین: ${esc(s.firstSource)} · ${ago(s.firstAt, now)}</span>${extra.meta ?? ""}`,
     main: takeButton(s),
     menu: [
-      `<button type="button" data-angles="${esc(s.trend?.text ?? s.title)}" title="آنچه مخاطب همراه این سوژه جستجو می‌کند">مردم چه می‌پرسند؟</button>`,
-      `<button type="button" data-copy="${esc(storyText(s))}" title="کپی برای پیام‌رسان">کپی</button>`,
+      `<button class="btn ghost small" type="button" data-angles="${esc(s.trend?.text ?? s.title)}" title="آنچه مخاطب همراه این سوژه جستجو می‌کند">مردم چه می‌پرسند؟</button>`,
+      promptButton(s, s.ours ? "update" : s.competitors?.length ? "gap" : "new"),
       extra.menu,
     ],
     body: extra.body ?? "",
     details: `<div class="sub">تیترها (${fa(s.items?.length ?? 0)})</div><ul>${items}</ul>`,
   });
 }
-
-// a click on a «⋯» item closes its menu; a click elsewhere closes every open one
-document.addEventListener("click", (e) => {
-  for (const menu of document.querySelectorAll("details.menu[open]")) {
-    // «کپی» stays open a moment: its «کپی شد» is the only sign that it worked
-    if (!menu.contains(e.target) || e.target.closest(".menu-items button:not([data-copy])")) menu.open = false;
-  }
-});
 
 // «جدید» on the stories not on the list the last time it was in sight: what a hidden page renders (the 3-minute
 // refresh) stays new until it is seen. The first time, the list is the baseline.
@@ -474,9 +470,9 @@ async function showDash(id) {
   const get = (path) => newsApi(path).then((r) => (r.status === 200 ? r.data : null));
   const [topics, gap, tg, mine, foreign, google, wiki, days] = await Promise.all([
     // a list switched off in the settings is not asked for
-    a && tabAvailable("topics") && get(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`),
-    a && tabAvailable("gap") && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.gapHours}`),
-    a && tabAvailable("telegram") && get(`telegram?mode=only&hours=${prefs.telegramHours}`),
+    a && tabAvailable("topics") && get(`topics?hours=${prefs.hours}&minSources=${topicMinSources(prefs)}`),
+    a && tabAvailable("gap") && gapS && get(`gap?siteId=${gapS.id}&hours=${prefs.hours}`),
+    a && tabAvailable("telegram") && get(`telegram?mode=only&hours=${prefs.hours}`),
     a && tabAvailable("mine") && mineS && get(`mine?siteId=${mineS.id}&hours=24`),
     a && tabAvailable("global") && state.foreignNews && get(`foreign?hours=${prefs.globalHours}`),
     get("google"), get("wiki?mode=rising"), get("days?offset=0"),
@@ -498,6 +494,44 @@ async function showDash(id) {
   const none = mineItems.length - first - late.length;
   const count = (list) => (list ? fa(list.length) : "—");
 
+  // «الان باید دید»: the stories that wait for someone, the most pressing first, each once and with why it is here: a
+  // watched word, then what the competitors told, then what is heating up. Not those a team's site has or a member took.
+  const now = topics?.now ?? gap?.now ?? tg?.now;
+  risingMinutes = topics?.risingMinutes ?? risingMinutes;
+  const need = [], needStories = [], needIds = new Set();
+  const addNeed = (list, ok, badges) => (list || []).forEach((s) => {
+    if (needIds.has(s.id) || s.ours || s.mark?.status === "taken" || !ok(s)) return;
+    needIds.add(s.id);
+    need.push(dashStory(s, badges(s)));
+    needStories.push(s);
+  });
+  const watchBadge = `<span class="badge watch">کلیدواژه تحت نظر</span>`;
+  addNeed(hot, (s) => s.watch, () => watchBadge);
+  addNeed(tgOnly, (s) => s.watch, () => `${watchBadge}<span class="badge tg">فقط در تلگرام</span>`);
+  addNeed(gaps, () => true, (s) => `<span class="badge late">رقبا زده‌اند: ${esc((s.competitors ?? []).join("، "))}</span>`);
+  addNeed(hot && [...hot].sort((x, y) => (y.recent ?? 0) - (x.recent ?? 0)), (s) => s.recent >= 2,
+    (s) => `<span class="badge new">${fa(s.recent)} منبع تازه</span>`);
+  // «تیم الان چه می‌نویسد»: the stories a member took, on any list, so nobody starts one twice. The foreign stories
+  // have ids of their own, so they are not folded in with the Persian ones.
+  const taken = [...new Map([...(hot || []), ...(gaps || []), ...(tgOnly || [])].map((s) => [s.id, s])).values(), ...(global || [])]
+    .filter((s) => s.mark?.status === "taken");
+  // «معطل»: taken that long ago and still on none of the team's sites; those first, the longest wait on top
+  const waited = (s) => Math.max(0, Math.round((Date.parse(now) - Date.parse(s.mark.at)) / 60000)) || 0;
+  const stalled = (s) => !s.ours && waited(s) >= STALLED_MINUTES;
+  taken.sort((x, y) => stalled(y) - stalled(x) || waited(y) - waited(x));
+  const stalledCount = taken.filter(stalled).length;
+  // «پوشش به تفکیک میز»: of each topic's hot stories, how many a team's site has; the desk furthest behind first
+  const desks = hot && mineS ? Object.values(hot.reduce((d, s) => {
+    const name = topicName(s.topic) ?? "سایر";
+    d[name] ??= { name, all: 0, ours: 0 };
+    d[name].all++;
+    if (s.ours) d[name].ours++;
+    return d;
+  }, {})).sort((x, y) => (y.all - y.ours) - (x.all - x.ours) || y.all - x.all) : [];
+  // how much of what the media tell the team's sites have, and how much is heating up now
+  const covered = hot ? hot.filter((s) => s.ours).length : 0;
+  const heating = hot ? hot.filter((s) => s.recent >= 2) : null;
+
   // «جا مانده‌ها»: the three lists that answer «what did I miss?», as one block: what the competitors told, what the
   // foreign media told, and what only Telegram channels told so far. A list switched off in the settings has no tile.
   const on = (name) => tabAvailable(name);
@@ -508,7 +542,11 @@ async function showDash(id) {
     on("telegram") ? tile("telegram", count(tgOnly), "فقط در تلگرام") : "",
   ].join("") : "";
   const tiles = (a ? [
-    on("topics") ? tile("topics", count(hot), `سوژه داغ (${fa(prefs.topicHours)} ساعت)`) : "",
+    // without a site that has a feed nothing can be «در سایت شما»: the plain count then
+    on("topics") ? (hot?.length && mineS
+      ? tile("topics", `${fa(covered)} از ${fa(hot.length)}`, `سوژه داغ را زده‌اید (${fa(prefs.hours)} ساعت)`)
+      : tile("topics", count(hot), `سوژه داغ (${fa(prefs.hours)} ساعت)`)) : "",
+    on("topics") ? tile("topics", count(heating), `رو به رشد (${fa(risingMinutes)} دقیقه اخیر)`) : "",
     on("mine") ? tile("mine", mine && first + late.length ? `${fa(Math.round((100 * first) / (first + late.length)))}٪` : "—", "اول منتشر کردید") : "",
   ] : []).concat([
     tile("trends", count(trends), "ترند گوگل"),
@@ -521,10 +559,33 @@ async function showDash(id) {
     <div class="legend"><span><i class="s-ok"></i>اول شما ${fa(first)}</span><span><i class="s-late"></i>بعد از رقبا ${fa(late.length)}</span><span><i class="s-none"></i>رقیبی نزده ${fa(none)}</span></div>
     ${late.length ? `<p class="muted" style="margin:4px 0 0">تأخیر میانه: ${duration(median)}</p>` : ""}` : "";
 
+  // «کپی گزارش شیفت»: the dashboard as text for the newsroom's group, what an editor hands over at the end of a shift
+  const report = a ? [
+    `گزارش جت‌سئو نیوز${mineS ? ` · ${mineS.domain}` : ""} · ${new Date(now ?? Date.now()).toLocaleString("fa-IR", { dateStyle: "medium", timeStyle: "short" })}`,
+    hot?.length && mineS ? `پوشش سوژه‌های داغ (${fa(prefs.hours)} ساعت اخیر): ${fa(covered)} از ${fa(hot.length)} (${fa(Math.round((100 * covered) / hot.length))}٪)` : "",
+    desks.length > 1 ? `به تفکیک میز: ${desks.map((d) => `${d.name} ${fa(d.ours)} از ${fa(d.all)}`).join("، ")}` : "",
+    gaps ? `شکاف پوشش باز: ${fa(gaps.length)}${gaps.slice(0, 5).map((s) => `\n- ${s.title} (رقبا: ${(s.competitors ?? []).join("، ")})`).join("")}` : "",
+    first + late.length ? `سرعت انتشار (۲۴ ساعت): اول ما ${fa(first)}، بعد از رقبا ${fa(late.length)}${late.length ? `، تأخیر میانه ${duration(median)}` : ""}` : "",
+    taken.length ? `در دست تیم:${taken.map((s) => `\n- ${s.mark.by || "یکی از اعضا"}: ${s.title}${s.ours ? " (منتشر شد)" : stalled(s) ? ` (${duration(waited(s))}، هنوز منتشر نشده)` : ""}`).join("")}` : "",
+    needStories.length ? `بی‌صاحب (${fa(needStories.length)}):${needStories.slice(0, 5).map((s) => `\n- ${s.title}`).join("")}` : "",
+  ].filter(Boolean).join("\n") : "";
+
   main.innerHTML = staleNote(topics)
     + (missed ? `<section class="card missed"><h3>جا مانده‌ها</h3><div class="tiles">${missed}</div></section>` : "")
-    + `<div class="tiles">${tiles}</div><div class="dash-grid">` +
-    section(`سوژه‌های داغ رسانه‌ها`, "topics", hot && bars(hot.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources, text: `${fa(s.sources)} منبع` })))) +
+    + `<div class="tiles">${tiles}</div>`
+    + (report ? `<p class="dash-acts"><button class="btn ghost small" type="button" data-copy="${esc(report)}" title="وضعیت همین لحظه (پوشش، میزها، شکاف‌ها، سرعت انتشار، کار اعضا) به صورت متن کپی می‌شود تا در گروه تحریریه بگذارید">کپی گزارش شیفت</button></p>` : "")
+    + `<div class="dash-grid">` +
+    section(`الان باید دید${need.length ? ` (${fa(need.length)})` : ""}`, "topics", (hot || gaps) && (need.length ? `<ul class="need">${need.slice(0, 6).join("")}</ul>`
+      : `<p class="muted" style="margin:0">سوژه‌ای منتظر شما نیست: نه کلیدواژه تحت نظر، نه شکاف پوشش و نه سوژه رو به رشدی که کسی برنداشته باشد.</p>`)) +
+    section(`تیم الان چه می‌نویسد${stalledCount ? ` <span class="badge late">${fa(stalledCount)} معطل</span>` : ""}`, "", taken.length && `<ul class="need">${taken.map((s) =>
+      dashStory(s, `${takenBadge(s, now)}${s.ours ? `<span class="badge ok">در سایت شما</span>`
+        : stalled(s) ? `<span class="badge late" title="«من می‌نویسم» زده شده و هنوز روی هیچ‌کدام از سایت‌های تیم نیامده است">${duration(waited(s))}، هنوز منتشر نشده</span>` : ""}`)).join("")}</ul>`) +
+    section("پوشش به تفکیک میز", "topics", desks.length > 1 && `<div class="bars">${desks.map((d) => `<div class="bar-row">
+      <span class="bar-label">${esc(d.name)}</span><span class="bar"><i style="width:${Math.round((100 * d.ours) / d.all)}%"></i></span>
+      <span class="bar-val">${fa(d.ours)} از ${fa(d.all)}</span></div>`).join("")}</div>`) +
+    section(`سوژه‌های داغ رسانه‌ها`, "topics", hot && bars(hot.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources,
+      // beside the count, where the team stands on it: published, or a member writing it
+      text: `${fa(s.sources)} منبع${s.ours ? ` <b class="has" title="در سایت شما">✓</b>` : s.mark?.status === "taken" ? ` <span title="می‌نویسد: ${esc(s.mark.by || "یکی از اعضا")}">✍</span>` : ""}` })))) +
     section(`شکاف پوشش ${gapS ? `<span class="muted" dir="ltr">${esc(gapS.domain)}</span>` : ""}`, "gap", gaps?.length && `<ul class="list">${gaps.slice(0, 3).map((s) =>
       `<li><a href="${safeUrl(s.items?.[0]?.url)}" target="_blank" rel="noopener">${esc(s.title)}</a> <span class="muted">رقبا: ${esc((s.competitors ?? []).join("، "))}</span></li>`).join("")}</ul>`) +
     section(`سرعت انتشار ما (۲۴ ساعت)`, "mine", speed) +
@@ -537,7 +598,13 @@ async function showDash(id) {
 }
 
 const tile = (go, value, label, tone = "") => `<button class="tile ${tone}" type="button" data-go="${go}"><b>${value}</b><span>${label}</span></button>`;
-const section = (title, go, body) => body ? `<section class="card"><h3 class="head"><span>${title}</span><a href="#" data-go="${go}">همه</a></h3>${body}</section>` : "";
+const section = (title, go, body) => body ? `<section class="card"><h3 class="head"><span>${title}</span>${go ? `<a href="#" data-go="${go}">همه</a>` : ""}</h3>${body}</section>` : "";
+// A story on the dashboard, one row: the headline, why it is there, how many told it, and «من می‌نویسم» while it is free
+// (the click marks it for the team and draws the dashboard again, where it moves to «تیم الان چه می‌نویسد»).
+// a member's «من می‌نویسم» that old with the story still on none of the team's sites is «معطل» on the dashboard
+const STALLED_MINUTES = 45;
+const dashStory = (s, badges) => `<li><a dir="auto" title="${esc(s.title)}" href="${safeUrl(s.items?.[0]?.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>${badges}
+  <span class="muted">${s.sources ? `${fa(s.sources)} منبع` : s.channels ? `${fa(s.channels)} کانال` : ""}</span>${s.mark?.status === "taken" ? "" : takeButton(s)}</li>`;
 
 // Horizontal bars, longest = the largest value. rows: { label, href, value, text }; text is already escaped.
 function bars(rows) {
@@ -577,7 +644,7 @@ async function showTopics(id) {
   const prefs = await newsPrefs();
   // in sight: the period, the order and the search; behind «فیلتر»: the least sources, «بدون آنچه زده‌ایم» and own topics
   main.innerHTML = controlsHtml(
-    `<label>بازه <select id="hours">${[1, 3, 6, 12].map((h) => `<option value="${h}" ${h === prefs.topicHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>
+    `${hoursHtml(prefs)}
      <label>ترتیب <select id="tsort">${Object.entries(TOPIC_SORTS).map(([key, sort]) => `<option value="${key}" ${key === prefs.topicSort ? "selected" : ""}>${sort.name}</option>`).join("")}</select></label>
      <input id="q" type="search" placeholder="جستجو در تیترها" aria-label="جستجو در تیترها" value="${esc(topicQuery)}" style="flex:1;min-width:100px" />`,
     `<label>حداقل منبع <select id="min"${newsFocused(prefs) ? ` disabled title="با «فقط کلیدواژه‌های من»، سوژه‌های تک‌منبعی هم می‌آیند"` : ""}>${[2, 3, 5, 8].map((m) => `<option value="${m}" ${m === prefs.minSources ? "selected" : ""}>${fa(m)}</option>`).join("")}</select></label>
@@ -587,7 +654,7 @@ async function showTopics(id) {
   wireControls();
   const bar = topicBar(prefs, () => show("topics"));
   if (bar) document.getElementById("fpanel").append(bar);
-  document.getElementById("hours").onchange = async (e) => { await saveNewsPrefs({ topicHours: +e.target.value }); show("topics"); };
+  wireHours("topics");
   document.getElementById("min").onchange = async (e) => { await saveNewsPrefs({ minSources: +e.target.value }); show("topics"); };
   document.getElementById("tsort").onchange = async (e) => { await saveNewsPrefs({ topicSort: e.target.value }); show("topics"); };
   document.getElementById("tours").onchange = async (e) => { await saveNewsPrefs({ topicHideOurs: e.target.checked }); show("topics"); };
@@ -607,7 +674,7 @@ async function showTopics(id) {
   // ponytail: under «فقط کلیدواژه‌های من» (topicMinSources) the server still sends only the 60 stories with the most
   // sites, so a one-site story of a busy period can be left out; an api/News endpoint that searches the headlines for
   // the words would find them all.
-  const res = await newsApi(`topics?hours=${prefs.topicHours}&minSources=${topicMinSources(prefs)}`);
+  const res = await newsApi(`topics?hours=${prefs.hours}&minSources=${topicMinSources(prefs)}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
@@ -655,15 +722,15 @@ async function showGap(id) {
   const prefs = await newsPrefs();
   main.innerHTML = controlsHtml(
     `${sites.length > 1 ? `<select id="site" aria-label="سایت">${sites.map((s) => `<option value="${s.id}" ${s.id === gapSite ? "selected" : ""}>${esc(s.domain)}</option>`).join("")}</select>` : `<strong dir="ltr">${esc(sites[0].domain)}</strong>`}
-     <label>بازه <select id="ghours">${[3, 6, 12, 24].map((h) => `<option value="${h}" ${h === prefs.gapHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>`)
+     ${hoursHtml(prefs)}`)
     + `<div id="list"><div class="empty">در حال بارگذاری…</div></div>`;
   const siteSelect = document.getElementById("site");
   if (siteSelect) siteSelect.onchange = (e) => { gapSite = +e.target.value; show("gap"); };
-  document.getElementById("ghours").onchange = async (e) => { await saveNewsPrefs({ gapHours: +e.target.value }); show("gap"); };
+  wireHours("gap");
   const site = sites.find((s) => s.id === gapSite) ?? sites[0];
   const list = document.getElementById("list");
   if (!site.hasFeed || !site.competitors) { list.innerHTML = gapGuide(site); return; }
-  const res = await newsApi(`gap?siteId=${site.id}&hours=${prefs.gapHours}`);
+  const res = await newsApi(`gap?siteId=${site.id}&hours=${prefs.hours}`);
   if (id !== loadId) return;
   if (res.status === 403) return start();
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
@@ -676,7 +743,7 @@ async function showGap(id) {
   list.innerHTML = staleNote(res.data) + `<p class="muted">سوژه‌هایی که دست‌کم ${fa(res.data.minCompetitors)} رقیب از ${fa(res.data.competitors)} رقیب شما کار کرده‌اند و ${esc(res.data.site)} نه.</p>` +
     (stories.length ? stories.map((s) => storyCard(s, res.data.now, {
       meta: `<span>رقبا: ${esc((s.competitors ?? []).join("، "))}</span>`,
-      menu: `<button type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ برای همه تیم پنهان می‌شود و هشدار نمی‌دهد">رد شد</button>`,
+      menu: `<button class="btn ghost small" type="button" data-skip="${esc(key(s))}" title="کار نمی‌کنیم؛ برای همه تیم پنهان می‌شود و هشدار نمی‌دهد">رد شد</button>`,
     })).join("") : `<div class="empty">${emptyText(prefs, "شکافی نیست؛ هرچه رقبا زده‌اند، شما هم زده‌اید.")}</div>`);
   chrome.runtime.sendMessage({ type: "news-gap-seen", ids: stories.map((s) => `${site.id}:${s.id}`) }).catch(() => {});
 }
@@ -715,8 +782,9 @@ function globalCard(s, now, risingHours) {
     meta: first ? `<span>اولین: <bdi>${esc(first.source)}</bdi> · ${ago(s.firstAt, now)}</span> ${translate(first.url)}` : "",
     main: takeButton(s),
     menu: [
-      s.key ? `<button type="button" data-gangles="${esc(s.key)}" title="آنچه مخاطب ایرانی همراه نام‌های این سوژه جستجو می‌کند">مردم چه می‌پرسند؟</button>` : "",
-      `<button type="button" data-mark="${dismissed ? "none" : "dismissed"}" data-story="${esc(s.id)}" title="${dismissed ? "سوژه دوباره برای همه تیم نمایش داده می‌شود" : "سوژه برای همه اعضای تیم پنهان می‌شود"}">${dismissed ? "برگرداندن برای تیم" : "رد برای تیم"}</button>`,
+      s.key ? `<button class="btn ghost small" type="button" data-gangles="${esc(s.key)}" title="آنچه مخاطب ایرانی همراه نام‌های این سوژه جستجو می‌کند">مردم چه می‌پرسند؟</button>` : "",
+      promptButton(s, "foreign"),
+      `<button class="btn ghost small" type="button" data-mark="${dismissed ? "none" : "dismissed"}" data-story="${esc(s.id)}" title="${dismissed ? "سوژه دوباره برای همه تیم نمایش داده می‌شود" : "سوژه برای همه اعضای تیم پنهان می‌شود"}">${dismissed ? "برگرداندن برای تیم" : "رد برای تیم"}</button>`,
     ],
     details: `<div class="sub">تیترها (${fa(items.length)})</div><ul dir="ltr" lang="en">${headlines}</ul>
       ${ours.length ? `<div class="sub">در سایت شما (${fa(ours.length)})</div><ul lang="fa">${persian(ours)}</ul>` : ""}
@@ -747,6 +815,7 @@ main.addEventListener("click", async (e) => {
   newsUsed("angles", globalCategory);
   out.innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای نام‌های این سوژه جستجوی مرتبطی پیشنهاد نمی‌دهد.</div>`;
   b.hidden = true;
+  addAngles(b.closest(".card"), angles);
 });
 
 // «بیشترین منبع» is the server's order (a core outlet weighs double). «رو به رشد»: the stories most sources picked up
@@ -994,7 +1063,7 @@ async function showTrends(id) {
       <div class="meta">${t.traffic ? `<span class="badge">${esc(t.traffic)} جستجو</span>` : ""}
         <a href="${newsUrl(t.title)}" target="_blank" rel="noopener">خبرهای فارسی</a>
         <button class="btn ghost small" type="button" data-angles="${esc(t.title)}" title="آنچه مخاطب همراه این ترند جستجو می‌کند">مردم چه می‌پرسند؟</button>
-        <button class="btn ghost small" type="button" data-copy="${esc(brief(t))}" data-trend="1" title="کپی بریف برای تحریریه">کپی بریف</button></div>
+        <button class="btn ghost small" type="button" data-copy="${esc(brief(t))}" title="کپی بریف برای تحریریه">کپی بریف</button></div>
       ${t.news?.length ? `<div class="sub">خبرهای مرتبط</div><ul class="muted" style="margin:0;padding-inline-start:16px">${t.news.map((x) => `<li><a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`).join("")}</ul>` : ""}
       <div class="angles"></div>
     </article>`).join("") : `<div class="empty">ترندی نیست.</div>`);
@@ -1015,7 +1084,18 @@ let kwSeed = "", kwRows = null, kwMode = "focus", kwNote = "";
 
 // Google's suggestions for the subject and its question and informational forms, four requests at a time (a burst of
 // thirty earns Google's «unusual traffic» page). Only phrases that hold every word of the subject, at most 300.
+// Google answers some subjects only when written as one word («زنبورعسل», nothing for «زنبور عسل»): a subject of
+// several words that finds fewer than KW_FEW phrases is asked again joined, and both answers are shown.
+const KW_FEW = 10;
 async function keywordIdeas(seed, progress) {
+  const ideas = await keywordIdeasOf(seed, progress);
+  const joined = seed.replace(/ /g, "");
+  if (ideas.length >= KW_FEW || joined === seed) return ideas;
+  // without the joined subject itself: the caller reads «more than the seed» as «Google answered»
+  return [...new Set([...ideas, ...(await keywordIdeasOf(joined, progress)).filter((s) => s !== joined)])].slice(0, 300);
+}
+
+async function keywordIdeasOf(seed, progress) {
   const queries = [seed, ...KW_ASK.flatMap((w) => [`${w} ${seed}`, `${seed} ${w}`]), ...KW_INFO_ASK.map((w) => `${w} ${seed}`)];
   const found = new Set([seed]);
   for (let i = 0; i < queries.length; i += 4) {
@@ -1196,10 +1276,10 @@ async function showTelegram(id) {
   const prefs = await newsPrefs();
   const modes = { only: "فقط در تلگرام", trend: "ترند تلگرام" };
   modeBar(modes, telegramMode, (v) => { telegramMode = v; show("telegram"); },
-    `<label>بازه <select id="thours">${[3, 6, 12].map((h) => `<option value="${h}" ${h === prefs.telegramHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>`);
-  document.getElementById("thours").onchange = async (e) => { await saveNewsPrefs({ telegramHours: +e.target.value }); show("telegram"); };
+    hoursHtml(prefs));
+  wireHours("telegram");
   const mode = telegramMode;
-  const res = await newsApi(`telegram?mode=${mode}&hours=${prefs.telegramHours}`);
+  const res = await newsApi(`telegram?mode=${mode}&hours=${prefs.hours}`);
   if (id !== loadId) return;
   const list = document.getElementById("list");
   if (res.status === 403) return start();
@@ -1267,10 +1347,10 @@ let mediaMode = "made";
 async function showMedia(id) {
   const prefs = await newsPrefs();
   modeBar({ made: "کار شده", chance: "فرصت" }, mediaMode, (v) => { mediaMode = v; show("media"); },
-    `<label>بازه <select id="mhours">${[3, 6, 12, 24].map((h) => `<option value="${h}" ${h === prefs.mediaHours ? "selected" : ""}>${fa(h)} ساعت</option>`).join("")}</select></label>`);
-  document.getElementById("mhours").onchange = async (e) => { await saveNewsPrefs({ mediaHours: +e.target.value }); show("media"); };
+    hoursHtml(prefs));
+  wireHours("media");
   const mode = mediaMode;
-  const res = await newsApi(`topics?hours=${prefs.mediaHours}&minSources=1`);
+  const res = await newsApi(`topics?hours=${prefs.hours}&minSources=1`);
   if (id !== loadId) return;
   const list = document.getElementById("list");
   if (res.status === 403) return start();
@@ -1296,22 +1376,159 @@ async function showMedia(id) {
     (made.length ? made.map((s) => storyCard(s, now, { meta: badges(s.media), body: rows(s.media) })).join("") : `<div class="empty">${emptyText(prefs, "در این بازه مطلب چندرسانه‌ای پیدا نشد.")}</div>`);
 }
 
-// «کپی برای پیام‌رسان»: a story as plain text for the team's Telegram or Bale group.
-function storyText(s) {
-  return [s.title, `${s.sources ? `${fa(s.sources)} منبع` : `${fa(s.channels)} کانال`} · اولین: ${s.firstSource}`, ...(s.items ?? []).slice(0, 8).map((i) => `- ${i.source}: ${i.url}`)].join("\n");
+// The prompt of a story: what the card knows (headlines, sources, links, the trend), written as a prompt the user pastes
+// into an AI assistant. One kind a card, by what the story is to the team:
+//   new: a story to write; update: one of the team's sites already tells it («در سایت شما»); gap: its competitors told
+//   it and the site did not (s.competitors); foreign: a story of «رسانه‌های خارجی», to be told in Persian.
+// NO_ANGLES stands where the answers of «مردم چه می‌پرسند؟» go once the user asks for them (addAngles).
+const NO_ANGLES = "(فهرستی در دست نیست؛ خودت پرسش‌ها و جستجوهای رایج مخاطب درباره این سوژه را پیدا کن.)";
+const promptLinks = (items) => items.slice(0, 8).map((i) => `- ${i.source}: ${i.title}\n  ${i.url}`).join("\n");
+// the last part of every prompt: what the assistant is to hand back
+const PROMPT_OUTPUT = "خروجی را به همین ترتیب بده:";
+const promptOutput = (list) => `${PROMPT_OUTPUT}\n${[...list, "در پایان: منابعی که استفاده کردی، و نکته‌هایی که تأیید نشده یا منابع درباره‌شان اختلاف دارند."].map((t) => `- ${t}`).join("\n")}`;
+const PROMPT_ARTICLE = [
+  "سه تیتر پیشنهادی: یکی خبری، یکی بر پایه پرسش مخاطب و یکی تحلیلی؛ هر کدام حداکثر ۶۵ نویسه. بگو کدام را پیشنهاد می‌کنی و چرا.",
+  "لید: دو تا سه جمله که مهم‌ترین واقعیت خبر را بگوید.",
+  "متن مطلب: ۴۰۰ تا ۷۰۰ کلمه، به سبک هرم وارونه، با میان‌تیتر و پاراگراف‌های کوتاه.",
+];
+const PROMPT_KINDS = {
+  new: {
+    hint: "پرامپت آماده برای هوش مصنوعی کپی می‌شود: خبرها را می‌خواند، پرسش‌های مردم را در نظر می‌گیرد و تیتر، لید و متن می‌نویسد",
+    task: "درباره سوژه زیر یک مطلب تازه و مستقل بنویس.",
+    steps: [
+      "واقعیت‌ها، عددها و نقل‌قول‌ها را از خبرها بیرون بکش و جایی را که منابع با هم اختلاف دارند مشخص کن.",
+      "مطلب را طوری بچین که به پرسش‌های مردم پاسخ بدهد؛ پرسش‌های مهم‌تر میان‌تیتر شوند.",
+      "زاویه‌ای پیدا کن که در خبرهای بالا کم‌رنگ است (پیامد برای مخاطب، پیشینه، قدم بعدی) تا مطلب تکرار آن‌ها نباشد.",
+    ],
+    output: PROMPT_ARTICLE,
+  },
+  update: {
+    hint: "این سوژه در سایت شما هست: پرامپتی کپی می‌شود که مطلب شما را با خبرهای تازه مقایسه می‌کند و می‌گوید چه چیزی اضافه یا اصلاح شود",
+    task: "ما این سوژه را قبلاً منتشر کرده‌ایم. مطلب ما را با خبرهای زیر مقایسه کن و بگو چطور به‌روز شود.",
+    extra: () => "مطلب ما:\n[نشانی یا متن مطلب خودتان را این‌جا بگذارید]",
+    steps: [
+      "مطلب ما و خبرها را بخوان و فهرست کن: چه چیز تازه‌ای آمده که در مطلب ما نیست، و چه چیزی در مطلب ما کهنه یا نادرست شده است.",
+      "ببین کدام پرسش‌های مردم در مطلب ما بی‌پاسخ مانده است.",
+      "مطلب را از نو ننویس؛ فقط همان بخش‌هایی را تغییر بده که لازم است.",
+    ],
+    output: [
+      "فهرست تغییرها: چه چیزی اضافه، اصلاح یا حذف شود و هر کدام بر پایه کدام منبع.",
+      "تیتر: اگر خبر تازه تیتر را کهنه کرده، یک تیتر تازه (حداکثر ۶۵ نویسه)؛ وگرنه بگو همان بماند.",
+      "لید به‌روزشده.",
+      "پاراگراف‌های تازه یا بازنویسی‌شده، با ذکر این‌که هر کدام کجای مطلب قرار می‌گیرد.",
+    ],
+  },
+  gap: {
+    hint: "رقبا این سوژه را زده‌اند: پرامپتی کپی می‌شود که مطلب آن‌ها را می‌خواند و زاویه‌ای پیدا می‌کند که هیچ‌کدام نگفته‌اند",
+    task: "رقبای ما این سوژه را منتشر کرده‌اند و ما نه. مطلبی بنویس که تکرار آن‌ها نباشد و چیزی بگوید که هیچ‌کدام نگفته‌اند.",
+    extra: (s) => `رقبایی که این سوژه را زده‌اند: ${s.competitors.join("، ")}`,
+    steps: [
+      "خبرها را بخوان و برای هر کدام کوتاه بنویس چه گفته است؛ بعد فهرست کن چه چیزی را هیچ‌کدام نگفته‌اند (پیامد برای مخاطب، پیشینه، عدد و مقایسه، پرسش بی‌پاسخ مردم).",
+      "از میان این جاهای خالی دو یا سه زاویه پیشنهاد بده و بهترین را برگزین؛ زاویه‌ای که بتوان با همین منابع از آن دفاع کرد.",
+      "مطلب را با همان زاویه بنویس و پرسش‌های مهم‌تر مردم را میان‌تیتر کن.",
+    ],
+    output: [
+      "هر منبع در یک خط: چه گفته است.",
+      "زاویه‌های پیشنهادی، با دلیل انتخاب بهترین.",
+      ...PROMPT_ARTICLE,
+    ],
+  },
+  foreign: {
+    hint: "پرامپت آماده برای هوش مصنوعی کپی می‌شود: خبرهای انگلیسی را می‌خواند و برای مخاطب ایرانی تیتر، لید و متن فارسی می‌نویسد",
+    task: "خبرهای انگلیسی زیر را بخوان و درباره این سوژه برای مخاطب ایرانی یک مطلب فارسی مستقل بنویس؛ ترجمه کلمه‌به‌کلمه نمی‌خواهم.",
+    extra: (s) => {
+      const persian = [...(s.ours ?? []), ...(s.covers ?? [])];
+      return `تیترهای فارسی که تا حالا درباره این سوژه پیدا شده (مطلب تو نباید تکرار این‌ها باشد):\n${persian.length ? promptLinks(persian) : "(موردی پیدا نشد.)"}`;
+    },
+    steps: [
+      "واقعیت‌ها، عددها و نقل‌قول‌ها را از خبرها بیرون بکش و جایی را که منابع با هم اختلاف دارند مشخص کن.",
+      "روشن کن این خبر برای مخاطب ایرانی چه اهمیتی دارد و مطلب را طوری بچین که به پرسش‌های مردم پاسخ بدهد.",
+      "نام‌ها و اصطلاح‌ها را با املای رایج فارسی بنویس و بار اول صورت لاتین را در پرانتز بیاور؛ واحدها و مبلغ‌ها را برای مخاطب ایرانی قابل‌فهم کن.",
+    ],
+    output: PROMPT_ARTICLE,
+  },
+};
+function storyPrompt(s, kind) {
+  const k = PROMPT_KINDS[kind];
+  const first = s.firstSource ?? s.items?.[0]?.source;
+  const steps = [...k.steps, "فقط از آنچه در منابع هست استفاده کن و چیزی از خودت نساز. جمله‌های منابع را کپی نکن؛ با بیان خودت بنویس و عدد و نقل‌قول را با نام منبع بیاور."];
+  return [
+    `تو خبرنگار و دبیر باتجربه یک رسانه فارسی‌زبان هستی و سئوی خبری را هم خوب می‌شناسی. ${k.task}`,
+    [`سوژه: ${s.title}`,
+      // like the card's count badge: a story may come with neither number
+      [s.sources ? `${fa(s.sources)} منبع آن را پوشش داده‌اند` : s.channels ? `${fa(s.channels)} کانال آن را پوشش داده‌اند` : "", first ? `اولین: ${first}` : ""].filter(Boolean).join(" · "),
+      s.trend ? `ترند ${s.trend.source}: ${s.trend.text}` : ""].filter(Boolean).join("\n"),
+    k.extra?.(s),
+    `خبرهای منتشرشده (همه را باز کن و کامل بخوان؛ اگر به وب دسترسی نداری، همین را بگو و متن خبرها را از من بخواه):\n${promptLinks(s.items ?? [])}`,
+    `پرسش‌های مردم (آنچه مخاطب همراه این سوژه در گوگل جستجو می‌کند):\n${NO_ANGLES}`,
+    `روش کار:\n${steps.map((t, i) => `${fa(i + 1)}. ${t}`).join("\n")}`,
+    promptOutput(k.output),
+  ].filter(Boolean).join("\n\n");
 }
 
+// The same prompt asking for something else than an article: offered under the card once its prompt is copied (not on
+// an update: that one is about the article already published). promptAs swaps the last part of the prompt as it is
+// then, so the answers of «مردم چه می‌پرسند؟» stay in.
+const PROMPT_FORMATS = {
+  telegram: {
+    label: "پست تلگرام",
+    output: [
+      "پست تلگرام: حداکثر ۸۰۰ نویسه. خط اول یک تیتر کوتاه، بعد سه تا پنج جمله کوتاه با مهم‌ترین واقعیت‌ها؛ بدون مقدمه‌چینی و بدون تکرار تیتر.",
+      "یک نسخه کوتاه‌تر از همان پست: حداکثر ۳۰۰ نویسه.",
+      "دو یا سه هشتگ مرتبط، و در خط آخر جای لینک مطلب: [نشانی مطلب].",
+    ],
+  },
+  discover: {
+    label: "گوگل دیسکاور",
+    output: [
+      "پنج تیتر برای گوگل دیسکاور: هر کدام حداکثر ۷۰ نویسه، روشن و کنجکاوی‌برانگیز، ولی بدون طعمه کلیک؛ تیتر چیزی وعده ندهد که در خبر نیست.",
+      "برای هر تیتر یک توضیح متا: ۱۲۰ تا ۱۵۵ نویسه.",
+      "پیشنهاد عکس شاخص: چه تصویری با این تیترها جور است (افقی، دست‌کم ۱۲۰۰ پیکسل عرض).",
+      "بگو کدام تیتر را پیشنهاد می‌کنی و چرا.",
+    ],
+  },
+  faq: {
+    label: "پرسش و پاسخ",
+    output: [
+      "پنج تا هشت پرسش که مخاطب واقعاً درباره این سوژه می‌پرسد (از پرسش‌های مردم شروع کن)، هر کدام به شکل یک میان‌تیتر.",
+      "پاسخ هر پرسش در دو تا چهار جمله؛ پاسخ مستقیم در جمله اول بیاید.",
+      "اگر منابع برای پرسشی پاسخ ندارند، همین را بگو («هنوز روشن نیست») و حدس نزن.",
+    ],
+  },
+};
+const promptAs = (text, format) => text.slice(0, text.lastIndexOf(PROMPT_OUTPUT)) + promptOutput(PROMPT_FORMATS[format].output);
+const promptButton = (s, kind) =>
+  `<button class="btn ghost small" type="button" data-copy="${esc(storyPrompt(s, kind))}"${kind === "update" ? "" : " data-formats"} title="${PROMPT_KINDS[kind].hint}">پرامپت</button>`;
+
+// the card's copy carries the answers of «مردم چه می‌پرسند؟» too: in their place in a story's prompt, at the end of a
+// trend's brief
+function addAngles(card, angles) {
+  const copy = card.querySelector("button[data-copy]");
+  if (!copy || !angles.length) return;
+  const list = angles.map((s) => `- ${s}`).join("\n");
+  copy.dataset.copy = copy.dataset.copy.includes(NO_ANGLES) ? copy.dataset.copy.replace(NO_ANGLES, () => list) : `${copy.dataset.copy}\nمردم این‌ها را هم جستجو می‌کنند:\n${list}`;
+}
+
+// A copy button (a story's prompt, a trend's brief), or one of the other outputs of a story's prompt (data-format).
+// Those show under the card the first time its prompt is copied.
 main.addEventListener("click", async (e) => {
-  const b = e.target.closest("button[data-copy]");
+  const b = e.target.closest("button[data-copy], button[data-format]");
   if (!b) return;
+  const card = b.closest(".card");
+  const label = (b.dataset.label ??= b.textContent);
+  // another output is made of the card's prompt as it is now (the angles may have joined it since it was drawn)
+  const text = b.dataset.format ? promptAs(card.querySelector("button[data-copy]").dataset.copy, b.dataset.format) : b.dataset.copy;
   try {
-    await navigator.clipboard.writeText(b.dataset.copy);
+    await navigator.clipboard.writeText(text);
     b.textContent = "کپی شد";
   } catch (error) {
     b.textContent = "کپی نشد";
   }
-  const label = b.dataset.trend ? "کپی بریف" : "کپی";
   setTimeout(() => { b.textContent = label; }, 2000);
+  if ("formats" in b.dataset && !card.querySelector(".formats")) {
+    card.querySelector(".angles").insertAdjacentHTML("beforebegin", `<div class="formats"><div class="sub">همین پرامپت با خروجی دیگر</div><div class="chips">${
+      Object.entries(PROMPT_FORMATS).map(([id, f]) => `<button class="chip" type="button" data-format="${id}" title="پرامپت همین سوژه کپی می‌شود، با خروجی «${f.label}» به جای مطلب">${f.label}</button>`).join("")}</div></div>`);
+  }
 });
 
 // «مردم چه می‌پرسند؟» of a story: Google's suggestions for its trend, or for its headline cut shorter until Google knows it
@@ -1338,9 +1555,7 @@ main.addEventListener("click", async (e) => {
   }
   card.querySelector(".angles").innerHTML = angles.length ? angleChips(angles, q) : `<div class="muted">گوگل برای این سوژه جستجوی مرتبطی پیشنهاد نمی‌دهد.</div>`;
   b.hidden = true;
-  // «کپی» now carries the angles too
-  const copy = card.querySelector("button[data-copy]");
-  if (angles.length) copy.dataset.copy += `\nمردم این‌ها را هم جستجو می‌کنند:\n${angles.map((s) => `- ${s}`).join("\n")}`;
+  addAngles(card, angles);
 });
 
 // «رد شد» on a gap story: gone from the list and the alerts, with a way back until the list is drawn again.
@@ -1432,6 +1647,7 @@ async function showSettings() {
       <h3>هشدارها</h3>
       <label class="row"><input type="checkbox" id="notifyGap" ${prefs.notifyGap ? "checked" : ""}/> سوژه‌ای که رقبا زده‌اند و ما نه</label>
       <label class="row"><input type="checkbox" id="notifyWatch" ${prefs.notifyWatch ? "checked" : ""}/> سوژه‌ای با کلیدواژه تحت نظر (تیم یا خودم)</label>
+      <label class="row"><input type="checkbox" id="notifyUnclaimed" ${prefs.notifyUnclaimed ?? owner ? "checked" : ""}/> سوژه بی‌صاحب: شکاف پوشش یا کلیدواژه تحت نظری که بعد از ۳۰ دقیقه هنوز کسی «من می‌نویسم» نزده (برای سردبیر و دبیر)</label>
       <p class="muted" style="margin:0">هر ۵ دقیقه بررسی می‌شود، تا وقتی کروم باز است.</p>
     </section>
     <section class="card">
@@ -1445,7 +1661,9 @@ async function showSettings() {
         <li><span class="badge tg">اول در تلگرام</span> کانال‌های تلگرام زودتر از سایت‌ها این خبر را گفته‌اند.</li>
         <li><span class="badge tg">می‌نویسد: نام</span> یکی از اعضای تیم «من می‌نویسم» را زده و روی این سوژه کار می‌کند.</li>
         <li><b>من می‌نویسم</b> به تیم می‌گوید این سوژه با شماست تا دو نفر یک خبر را ننویسند؛ <b>منصرف شدم</b> آن را آزاد می‌کند.</li>
-        <li><b>مردم چه می‌پرسند؟</b> (زیر ⋯) چیزهایی که مخاطب همراه این سوژه در گوگل جستجو می‌کند؛ ایده تیتر و میان‌تیتر.</li>
+        <li><b>مردم چه می‌پرسند؟</b> چیزهایی که مخاطب همراه این سوژه در گوگل جستجو می‌کند؛ ایده تیتر و میان‌تیتر.</li>
+        <li><b>پرامپت</b> یک پرامپت آماده کپی می‌کند تا به هوش مصنوعی بدهید، و خودش با سوژه جور می‌شود: برای سوژه تازه سه تیتر، لید و متن مطلب می‌خواهد؛ روی سوژه‌ای که «در سایت شما» هست می‌گوید چه چیزی به مطلبتان اضافه یا اصلاح شود (نشانی یا متن مطلب خودتان را در جای مشخص‌شده پرامپت بگذارید)؛ در «شکاف پوشش» زاویه‌ای می‌خواهد که رقبا نگفته‌اند؛ و در «رسانه‌های خارجی» از خبرهای انگلیسی مطلب فارسی. اگر اول «مردم چه می‌پرسند؟» را بزنید، آن پرسش‌ها هم در پرامپت می‌آیند. نشانگر را روی دکمه نگه دارید تا بگوید کدام است.</li>
+        <li>بعد از کپی پرامپت (جز روی سوژه‌ای که «در سایت شما» هست)، زیر کارت سه خروجی دیگر برای همان سوژه می‌آید: <b>پست تلگرام</b>، <b>گوگل دیسکاور</b> (تیتر و توضیح) و <b>پرسش و پاسخ</b>.</li>
         <li><b>⬇ اکسل</b> (بالای صفحه) فهرستی را که می‌بینید به صورت فایل ذخیره می‌کند.</li>
       </ul>
     </section>
@@ -1471,6 +1689,7 @@ async function showSettings() {
       ...(offeredTopics().length > 1 ? { topics: [...document.querySelectorAll("input[name=topic]:checked")].map((c) => c.value) } : {}),
       notifyGap: document.getElementById("notifyGap").checked,
       notifyWatch: document.getElementById("notifyWatch").checked,
+      notifyUnclaimed: document.getElementById("notifyUnclaimed").checked,
       hiddenTabs: [...document.querySelectorAll("input[name=showtab]:not(:checked)")].map((c) => c.value),
     });
     hiddenTabs = (await newsPrefs()).hiddenTabs;
@@ -1497,7 +1716,9 @@ chrome.action.getBadgeText({}).then((text) => {
 start();
 // not while the user types in a field: the redraw would take the focus
 setInterval(() => {
-  // nor while the answers of «مردم چه می‌پرسند؟» or a «⋯» menu are open on a card: the redraw would take them away
+  // nor while the answers of «مردم چه می‌پرسند؟» are open on a card: the redraw would take them away. The other outputs
+  // of a prompt (.formats) do not hold it back: copying a prompt is what a card is for, and the list would stop
+  // refreshing after the first one; they come back with the next copy.
   if (state?.access && ["dash", "topics", "gap"].includes(tab) && !document.activeElement?.matches("input, textarea, select")
-    && !main.querySelector(".angles:not(:empty), details.menu[open]")) show(tab);
+    && !main.querySelector(".angles:not(:empty)")) show(tab);
 }, 3 * 60 * 1000);

@@ -108,13 +108,13 @@ async function newsPrefs() {
     topics: prefs.topics ?? [],
     notifyGap: prefs.notifyGap ?? true,
     notifyWatch: prefs.notifyWatch ?? true,
-    topicHours: prefs.topicHours ?? 3,
+    // stories nobody took after a while; unset = on for the subscription's owner, off for a member (background.js)
+    notifyUnclaimed: prefs.notifyUnclaimed,
+    // one period for the Persian story lists; before 0.10 each list had its own, and the hot stories' is kept
+    hours: prefs.hours ?? prefs.topicHours ?? 6,
     topicSort: prefs.topicSort ?? "top",
     topicHideOurs: prefs.topicHideOurs ?? false,
     minSources: prefs.minSources ?? 2,
-    gapHours: prefs.gapHours ?? 6,
-    telegramHours: prefs.telegramHours ?? 6,
-    mediaHours: prefs.mediaHours ?? 6,
     globalHours: prefs.globalHours ?? 24,
     globalCategory: prefs.globalCategory ?? "",
     globalSort: prefs.globalSort ?? "top",

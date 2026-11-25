@@ -119,15 +119,9 @@ textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-
 .card ul[dir="ltr"] { padding-inline-start: 16px }
 .global .card.dismissed { opacity: .6 }
 .card .sub + ul { margin: 2px 0 0; padding-inline-start: 16px }
-/* «⋯»: the other actions of a story */
-details.menu { position: relative; display: inline-block }
-details.menu > summary { list-style: none; margin: 0; width: 28px; text-align: center; border: 1px solid var(--line); border-radius: 8px; font-size: 14px; line-height: 22px; color: var(--brand) }
-details.menu > summary::-webkit-details-marker { display: none }
-.menu-items { position: absolute; inset-inline-end: 0; top: 26px; z-index: 3; min-width: 130px; display: grid; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, .12) }
-.menu-items button { border: 0; background: transparent; padding: 4px 10px; border-radius: 6px; text-align: start; cursor: pointer; white-space: nowrap }
-.menu-items button:hover { background: var(--brand-soft); color: var(--brand) }
-/* the main button and «⋯» stay together at the line's end */
-.acts { margin-inline-start: auto; display: inline-flex; gap: 4px; align-items: center; white-space: nowrap }
+/* the actions of a story stay together at the line's end, and go to a second line in a narrow panel */
+.acts { margin-inline-start: auto; display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; align-items: center }
+.acts .btn { white-space: nowrap }
 .acts .btn.small { margin-inline-start: 0 }
 /* the controls behind «فیلتر» */
 .controls.filters { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 10px }
@@ -138,6 +132,18 @@ details.menu > summary::-webkit-details-marker { display: none }
 .card.missed h3 { margin-bottom: 8px }
 .card.missed .tiles { margin: 0 }
 .card.missed .tile { background: var(--bg) }
+/* the dashboard's story rows («الان باید دید», «تیم الان چه می‌نویسد»): the headline on its own line, the rest under it */
+.need { list-style: none; margin: 0; padding: 0 }
+.need li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 0; border-top: 1px solid var(--line) }
+.need li:first-child { border-top: 0; padding-top: 0 }
+/* two lines at most: a headline that is a whole paragraph would push the other cards out of sight (the rest is in its title) */
+.need li > a { flex: 1 1 100%; font-weight: 700; color: var(--text); text-decoration: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden }
+.dash-acts { margin: 0 0 8px; text-align: end }
+/* the same two lines for the headlines of the dashboard's coverage gap */
+.dash-grid ul.list li > a { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden }
+.need li > a:hover { color: var(--brand); text-decoration: underline }
+.need .btn.small { margin-inline-start: auto }
+.bar-val .has { color: var(--ok) }
 /* the three steps of an empty coverage gap */
 .guide ol { margin: 6px 0 12px; padding-inline-start: 20px }
 .guide li { margin: 6px 0 }
@@ -164,7 +170,8 @@ body.page main { max-width: 1200px; margin: 0 auto; padding: 16px }
 body.page .tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px }
 body.page .tile { padding: 12px 14px }
 body.page .tile b { font-size: 26px }
-body.page .dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; align-items: start }
-body.page .dash-grid .card { margin: 0 }
+/* columns, not a grid: a tall card («الان باید دید») no longer leaves a hole beside it, and the cards after it fill the next column */
+body.page .dash-grid { columns: 360px; column-gap: 10px }
+body.page .dash-grid .card { margin: 0 0 10px; break-inside: avoid }
 body.page .bar { height: 10px }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px }
