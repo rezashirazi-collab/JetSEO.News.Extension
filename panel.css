@@ -4,33 +4,42 @@
 @font-face { font-family: Vazirmatn; src: url("fonts/Vazirmatn-Bold.ttf") format("truetype"); font-weight: 600 900 }
 :root {
   --bg: #f6f7fb; --card: #fff; --text: #1f2937; --muted: #6b7280; --line: #e5e7eb;
-  --brand: #1e40af; --brand-soft: #eef2ff; --warn-bg: #fffbeb; --warn: #92400e; --bad-bg: #fef2f2; --bad: #991b1b; --ok: #166534;
+  --brand: #1e40af; --brand-soft: #eef2ff; --warn-bg: #fffbeb; --warn: #92400e; --bad-bg: #fef2f2; --bad: #991b1b; --ok: #166534; --ok-bg: #f0fdf4;
+  /* the orange of the logo and of the main button: the mark of a section's heading and of the team's own row */
+  --accent: #f97316;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .05); --shadow-up: 0 6px 16px rgba(16, 24, 40, .09);
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #111827; --card: #1f2937; --text: #f3f4f6; --muted: #9ca3af; --line: #374151; --brand: #93c5fd; --brand-soft: #1e3a8a; --warn-bg: #422006; --warn: #fde68a; --bad-bg: #450a0a; --bad: #fecaca; --ok: #86efac; }
+  :root { --bg: #111827; --card: #1f2937; --text: #f3f4f6; --muted: #9ca3af; --line: #374151; --brand: #93c5fd; --brand-soft: #1e3a8a; --warn-bg: #422006; --warn: #fde68a; --bad-bg: #450a0a; --bad: #fecaca; --ok: #86efac; --ok-bg: #052e16; --shadow: none; --shadow-up: 0 6px 16px rgba(0, 0, 0, .35); }
 }
-* { box-sizing: border-box }
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: var(--line) transparent }
+button, a, .card, .tile, .chip { transition: background-color .15s, border-color .15s, box-shadow .15s, color .15s, transform .15s }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
 /* the hidden attribute wins over display rules below (.tabs is flex) */
 [hidden] { display: none !important }
 body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.8 Vazirmatn, "Segoe UI", Tahoma, sans-serif }
-a { color: var(--brand) }
+a { color: var(--brand); text-underline-offset: 3px; text-decoration-thickness: 1px }
 button, select, input, textarea { font: inherit; color: inherit }
 .muted { color: var(--muted); font-size: 12px }
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2 }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2 }
+.top strong { font-size: 14.5px; font-weight: 700 }
 .top #who { margin-inline-start: auto }
 .icon { border: 1px solid var(--line); background: var(--card); border-radius: 8px; width: 30px; height: 30px; cursor: pointer }
+.icon:hover { background: var(--bg); border-color: var(--brand) }
 .tabs { display: flex; gap: 4px; padding: 8px 10px; overflow-x: auto; background: var(--card); border-bottom: 1px solid var(--line) }
 .tabs button { border: 0; background: transparent; padding: 4px 8px; border-radius: 14px; cursor: pointer; white-space: nowrap; font-size: 12.5px }
-.tabs button.on { background: var(--brand-soft); color: var(--brand); font-weight: 700 }
+.tabs button:hover { background: var(--bg) }
+.tabs button.on, .tabs button.on:hover { background: var(--brand-soft); color: var(--brand); font-weight: 700 }
 .count { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: #dc2626; color: #fff; font-size: 11px; line-height: 18px; text-align: center }
 main { padding: 10px }
 #banner { margin: 10px 10px 0; padding: 8px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn) }
 #banner.bad { background: var(--bad-bg); color: var(--bad) }
 .stale { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: var(--bad-bg); color: var(--bad) }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--shadow) }
+article.card:hover { border-color: color-mix(in srgb, var(--brand) 35%, var(--line)) }
 .card h3 { font-size: 13.5px; margin: 0 0 4px; line-height: 1.7 }
 .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; color: var(--muted); font-size: 12px }
-.badge { display: inline-block; padding: 0 8px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); font-size: 11.5px }
+.badge { display: inline-block; padding: 0 8px; border-radius: 10px; font-weight: 500; background: var(--brand-soft); color: var(--brand); font-size: 11.5px }
 .badge.watch { background: #fef3c7; color: #92400e }
 .badge.ok { background: #dcfce7; color: #166534 }
 .badge.late { background: #fee2e2; color: #991b1b }
@@ -40,7 +49,7 @@ main { padding: 10px }
 .btn.small { padding: 0 10px; margin-inline-start: auto }
 .btn.small + .btn.small { margin-inline-start: 0 }
 .badge.new { background: #ffedd5; color: #9a3412; font-weight: 700 }
-.card.fresh { border-inline-start: 3px solid #f97316 }
+.card.fresh { border-inline-start: 3px solid var(--accent) }
 kbd { font: 11.5px monospace; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px }
 .checks { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 6px }
 .check { font-size: 12.5px; line-height: 1.8; margin: 2px 0 }
@@ -69,21 +78,30 @@ button.chip { background: var(--card); color: inherit; font: inherit; font-size:
 fieldset.topics-pick { border: 0; padding: 0; margin: 10px 0 0 }
 fieldset.topics-pick legend { padding: 0; font-size: 13px }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 6px; margin-bottom: 8px }
-.tile { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 8px 10px; cursor: pointer; text-align: start }
-.tile:hover { border-color: var(--brand) }
-.tile b { font-size: 20px; line-height: 1.4; color: var(--brand) }
+.tile { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 8px 10px; cursor: pointer; text-align: start; box-shadow: var(--shadow) }
+.tile:hover { border-color: var(--brand); box-shadow: var(--shadow-up); transform: translateY(-1px) }
+.tile b { font-size: 20px; line-height: 1.4; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums }
+/* a number that says something is wrong or fine tints its whole tile, so it is seen before it is read */
+.tile.bad, .card.missed .tile.bad { background: var(--bad-bg); border-color: color-mix(in srgb, var(--bad) 20%, transparent) }
+.tile.ok, .card.missed .tile.ok { background: var(--ok-bg); border-color: color-mix(in srgb, var(--ok) 20%, transparent) }
 .tile.bad b { color: var(--bad) }
 .tile.ok b { color: var(--ok) }
 .tile span { font-size: 11.5px; color: var(--muted) }
 .card h3.head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px }
-.card h3.head a { font-size: 12px; font-weight: 400; white-space: nowrap }
+.card h3.head a { font-size: 12px; font-weight: 400; white-space: nowrap; text-decoration: none }
+.card h3.head a::after { content: " ‹" }
+.card h3.head a:hover { text-decoration: underline }
+/* a section's heading on the dashboard: a short mark in the logo's orange */
+.card h3.head > span:first-child::before, .card.missed h3::before { content: ""; display: inline-block; width: 3px; height: 12px; border-radius: 2px; background: var(--accent); margin-inline-end: 7px; vertical-align: -1px }
 .bars { display: grid; gap: 5px }
 .bar-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(40px, 1fr) auto; gap: 8px; align-items: center; font-size: 12px }
 .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none }
 .bar-label:hover { color: var(--brand); text-decoration: underline }
-.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden }
+.bar { height: 8px; background: color-mix(in srgb, var(--line) 65%, transparent); border-radius: 4px; overflow: hidden }
 .bar i { display: block; height: 100%; background: var(--brand); border-radius: 4px }
 .bar-val { color: var(--muted); white-space: nowrap; font-size: 11.5px }
+.bar-row.ours .bar-label { font-weight: 700; color: var(--brand) }
+.bar-row.ours .bar i { background: var(--accent) }
 .stack { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--line); margin: 6px 0 4px }
 .s-ok { background: #16a34a } .s-late { background: #dc2626 } .s-none { background: #9ca3af }
 .legend { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11.5px; color: var(--muted) }
@@ -91,9 +109,12 @@ fieldset.topics-pick legend { padding: 0; font-size: 13px }
 ul.list { margin: 0; padding-inline-start: 16px }
 ul.list li { margin: 2px 0 }
 ul.list li.ours { list-style: "★ " }
-.controls select, .controls input { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 2px 6px }
-.btn { display: inline-block; border: 0; border-radius: 8px; padding: 6px 14px; background: #f97316; color: #fff; text-decoration: none; cursor: pointer }
-.btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line) }
+.controls select, .controls input { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 3px 8px }
+.controls select:hover, .controls input:hover { border-color: var(--brand) }
+.btn { display: inline-block; border: 0; border-radius: 8px; padding: 6px 14px; background: var(--accent); color: #fff; font-weight: 600; text-decoration: none; cursor: pointer }
+.btn:hover { filter: brightness(.94) }
+.btn.ghost { background: transparent; color: var(--brand); border: 1px solid var(--line); font-weight: 400 }
+.btn.ghost:hover { background: var(--brand-soft); border-color: var(--brand); filter: none }
 .empty { text-align: center; color: var(--muted); padding: 24px 8px }
 /* «کلمات پرجستجو»: phrase, kind, monthly searches */
 .kw { width: 100%; border-collapse: collapse }
@@ -140,8 +161,8 @@ textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-
 .need li > a { flex: 1 1 100%; font-weight: 700; color: var(--text); text-decoration: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden }
 .dash-acts { margin: 0 0 8px; text-align: end }
 /* the same two lines for the headlines of the dashboard's coverage gap */
-.dash-grid ul.list li > a { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden }
-.need li > a:hover { color: var(--brand); text-decoration: underline }
+.dash-grid ul.list li > a { color: var(--text); text-decoration: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden }
+.need li > a:hover, .dash-grid ul.list li > a:hover { color: var(--brand); text-decoration: underline }
 .need .btn.small { margin-inline-start: auto }
 .bar-val .has { color: var(--ok) }
 /* the three steps of an empty coverage gap */
@@ -184,6 +205,8 @@ body.page > .tabs.side { grid-column: 2; grid-row: 2 / span 6; position: sticky;
 .tabs.side h4 { margin: 12px 10px 2px; font-size: 11.5px; font-weight: 400; color: var(--muted) }
 .tabs.side button { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; text-align: start }
 .tabs.side button:hover { background: var(--card) }
+.tabs.side button.on { position: relative }
+.tabs.side button.on::before { content: ""; position: absolute; inset-block: 7px; inset-inline-start: 0; width: 3px; border-radius: 2px; background: var(--brand) }
 body.page #focus, body.page #whatsnew, body.page #banner { max-width: none; margin: 12px 16px 0 }
 body.page main { max-width: none; margin: 0 }
 /* a narrow window: the menu goes back over the content, wrapping */
@@ -191,4 +214,10 @@ body.page main { max-width: none; margin: 0 }
   body.page { display: block }
   body.page > .tabs.side { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 8px 16px }
   .tabs.side h4 { margin: 0 4px }
+}
+@media (prefers-color-scheme: dark) {
+  /* the badges' pastel grounds glare on a dark card: a tint of each badge's own colour there */
+  .badge.watch, .badge.ok, .badge.late, .badge.trend, .badge.tg, .badge.media, .badge.new, .badge.topic { background: color-mix(in srgb, currentColor 16%, transparent) }
+  .badge.watch { color: #fcd34d } .badge.ok { color: #86efac } .badge.late { color: #fca5a5 } .badge.trend { color: #c4b5fd }
+  .badge.tg { color: #7dd3fc } .badge.media { color: #f9a8d4 } .badge.new { color: #fdba74 } .badge.topic { color: #6ee7b7 }
 }

@@ -180,6 +180,39 @@ function newsPersonal(stories, prefs) {
     .filter((s) => !newsFocused(prefs) || s.watch);
 }
 
+const newsHost = (domain) => String(domain ?? "").toLowerCase().replace(/^www\./, "");
+
+// «مقایسه با رسانه‌های دیگر»: of the hot stories, how many each site told and how many it told first (among the sites; a
+// Telegram channel that was ahead is not counted). The team's own sites (ownDomains) are one row, ours: its covered is
+// the server's s.ours, and its first is null when none of its headlines is listed (a feed outside JetSEO's catalog is
+// in no story's items, so who was first cannot be told). Most covered first, then most often first.
+// ponytail: a story lists its 12 earliest sites only, so a site that came later to a story of more (cut counts those
+// stories) is not counted for it, and only the 60 hottest stories are sent; an api/News endpoint that counts on the
+// server would be exact and could go back days.
+function newsMediaRank(stories, ownDomains) {
+  const own = new Set((ownDomains ?? []).map(newsHost));
+  const rows = new Map();
+  const row = (key, name) => rows.get(key) ?? rows.set(key, { name, ours: key === "", covered: 0, first: 0 }).get(key);
+  let ownListed = false, cut = 0;
+  for (const s of stories ?? []) {
+    if (s.sources > 12) cut++;
+    const told = new Set();
+    (s.items ?? []).filter((i) => !i.telegram).forEach((i, n) => {
+      const key = own.has(newsHost(i.domain)) ? "" : newsHost(i.domain);
+      if (told.has(key)) return;
+      told.add(key);
+      const r = row(key, i.source);
+      r.covered++;
+      if (n === 0) r.first++;
+      if (!key) ownListed = true;
+    });
+    if (s.ours && !told.has("")) row("", "").covered++;
+  }
+  const ours = rows.get("");
+  if (ours && !ownListed) ours.first = null;
+  return { cut, rows: [...rows.values()].sort((a, b) => b.covered - a.covered || (b.first ?? 0) - (a.first ?? 0)) };
+}
+
 // A list as the text of a CSV file («خروجی»): a BOM so that Excel reads the Persian, CRLF rows, quotes doubled.
 // Text that begins with = + - or @ would run as a formula in Excel, and the headlines come from the web: such a cell
 // gets a leading apostrophe. Numbers are passed as numbers and stay as they are (a negative lag is «-12»).

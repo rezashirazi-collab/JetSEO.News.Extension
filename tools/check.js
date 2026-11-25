@@ -41,6 +41,19 @@ assert.strictEqual(ids(api.newsGlobal(stories, prefs())), "[1,3]");
 assert.strictEqual(ids(api.newsPersonal(stories, prefs({ watchOnly: false }))), "[1,2,3]");
 assert.strictEqual(ids(api.newsPersonal(stories, prefs({ watch: [] }))), "[1,2,3]");
 
+// «مقایسه با رسانه‌های دیگر»: a site once per story, first = the earliest site (not the channel ahead of it), the team's
+// sites one row whose covered is the server's ours, and no «first» for a team whose headlines are in no story
+const told = (domain, more) => ({ source: domain, domain, ...more });
+const hotStories = [
+  { sources: 3, ours: true, items: [told("t.me/x", { telegram: true }), told("a.ir"), told("www.Ours.ir"), told("a.ir"), told("b.ir")] },
+  { sources: 2, items: [told("b.ir"), told("a.ir")] },
+  { sources: 13, ours: true, items: [told("a.ir")] },
+];
+const rank = api.newsMediaRank(hotStories, ["ours.ir"]);
+assert.strictEqual(JSON.stringify(rank.rows.map((r) => [r.ours ? "ours" : r.name, r.covered, r.first])), '[["a.ir",3,2],["b.ir",2,1],["ours",2,0]]');
+assert.strictEqual(rank.cut, 1);
+assert.strictEqual(api.newsMediaRank(hotStories, ["other.ir"]).rows.find((r) => r.ours).first, null);
+
 // The story prompts (panel.js, which needs a browser: only the block from NO_ANGLES to addAngles is run here). Each
 // kind names its story and its links, says what only it says, and keeps one place for «مردم چه می‌پرسند؟».
 const panel = fs.readFileSync(path.join(__dirname, "..", "panel.js"), "utf8");

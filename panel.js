@@ -570,6 +570,17 @@ async function showDash(id) {
     tile("days", count(round), "سالگرد رُند امروز"),
   ]).join("");
 
+  // «مقایسه با رسانه‌های دیگر»: the sites by how many of the hot stories each told and how many it told first
+  // (api.js newsMediaRank). The 8 that told most, and the team's own row wherever it stands.
+  const rank = hot?.length ? newsMediaRank(hot, sites.filter((s) => s.hasFeed).map((s) => s.domain)) : null;
+  const rankShown = rank ? rank.rows.map((r, n) => ({ ...r, place: n + 1 })).filter((r) => r.place <= 8 || r.ours) : [];
+  const firstText = (r) => (r.first == null ? "" : ` · ${fa(r.first)} بار اول`);
+  const rankHtml = rankShown.length > 1 && `<div class="bars">${rankShown.map((r) => `<div class="bar-row${r.ours ? " ours" : ""}">
+      <span class="bar-label">${fa(r.place)}. ${r.ours ? "شما" : esc(r.name)}</span><span class="bar"><i style="width:${Math.max(4, Math.round((100 * r.covered) / hot.length))}%"></i></span>
+      <span class="bar-val"${r.first == null ? ` title="خبرهای سایت شما در فهرست منابع سوژه‌ها نیست؛ سرعت شما در «سرعت انتشار ما» آمده است"` : ""}>${fa(r.covered)} از ${fa(hot.length)}${firstText(r)}</span></div>`).join("")}</div>
+    <p class="muted" style="margin:4px 0 0">از ${fa(hot.length)} سوژه داغ این بازه: چند تا را پوشش داده و چند بار اولین سایت بوده است.${
+      rank.cut ? ` در ${fa(rank.cut)} سوژه پرمنبع فقط ۱۲ سایت اول شمرده شده‌اند.` : ""}</p>`;
+
   const median = late.length ? late.map((i) => i.lagMinutes).sort((x, y) => x - y)[Math.floor(late.length / 2)] : 0;
   const speed = mineItems.length ? `<div class="stack"><i class="s-ok" style="flex:${first}"></i><i class="s-late" style="flex:${late.length}"></i><i class="s-none" style="flex:${none}"></i></div>
     <div class="legend"><span><i class="s-ok"></i>اول شما ${fa(first)}</span><span><i class="s-late"></i>بعد از رقبا ${fa(late.length)}</span><span><i class="s-none"></i>رقیبی نزده ${fa(none)}</span></div>
@@ -580,11 +591,35 @@ async function showDash(id) {
     `گزارش جت‌سئو نیوز${mineS ? ` · ${mineS.domain}` : ""} · ${new Date(now ?? Date.now()).toLocaleString("fa-IR", { dateStyle: "medium", timeStyle: "short" })}`,
     hot?.length && mineS ? `پوشش سوژه‌های داغ (${fa(prefs.hours)} ساعت اخیر): ${fa(covered)} از ${fa(hot.length)} (${fa(Math.round((100 * covered) / hot.length))}٪)` : "",
     desks.length > 1 ? `به تفکیک میز: ${desks.map((d) => `${d.name} ${fa(d.ours)} از ${fa(d.all)}`).join("، ")}` : "",
-    gaps ? `شکاف پوشش باز: ${fa(gaps.length)}${gaps.slice(0, 5).map((s) => `\n- ${s.title} (رقبا: ${(s.competitors ?? []).join("، ")})`).join("")}` : "",
+    rankShown.length > 1 ? `رتبه پوشش بین رسانه‌ها: ${rankShown.map((r) => `${fa(r.place)}. ${r.ours ? "ما" : r.name} (${fa(r.covered)}${firstText(r)})`).join("، ")}` : "",
+    gaps ? `شکاف پوشش باز:${fa(gaps.length)}${gaps.slice(0, 5).map((s) => `\n- ${s.title} (رقبا: ${(s.competitors ?? []).join("، ")})`).join("")}` : "",
     first + late.length ? `سرعت انتشار (۲۴ ساعت): اول ما ${fa(first)}، بعد از رقبا ${fa(late.length)}${late.length ? `، تأخیر میانه ${duration(median)}` : ""}` : "",
     taken.length ? `در دست تیم:${taken.map((s) => `\n- ${s.mark.by || "یکی از اعضا"}: ${s.title}${s.ours ? " (منتشر شد)" : stalled(s) ? ` (${duration(waited(s))}، هنوز منتشر نشده)` : ""}`).join("")}` : "",
     needStories.length ? `بی‌صاحب (${fa(needStories.length)}):${needStories.slice(0, 5).map((s) => `\n- ${s.title}`).join("")}` : "",
   ].filter(Boolean).join("\n") : "";
+
+  // «⬇ اکسل» on the dashboard: its numbers and lists as one sheet, a block per «بخش». The media ranking is whole here,
+  // not only the 8 rows of the card. Numbers go as numbers, so Excel can sort and sum them.
+  const sheet = [];
+  const add = (part, title, value, note = "", link = "") => sheet.push([part, title, value ?? "", note, link]);
+  if (hot) add("خلاصه", `سوژه داغ (${prefs.hours} ساعت)`, hot.length);
+  if (hot && mineS) add("خلاصه", "سوژه داغی که زده‌ایم", covered, `از ${hot.length}`);
+  if (heating) add("خلاصه", "سوژه رو به رشد", heating.length);
+  if (gaps) add("خلاصه", "شکاف پوشش باز", gaps.length, gapS.domain);
+  if (tgOnly) add("خلاصه", "فقط در تلگرام", tgOnly.length);
+  if (global) add("خلاصه", `سوژه رسانه‌های خارجی (${prefs.globalHours} ساعت)`, global.length);
+  if (first + late.length) {
+    add("سرعت انتشار (۲۴ ساعت)", "اول ما", first);
+    add("سرعت انتشار (۲۴ ساعت)", "بعد از رقبا", late.length, late.length ? `تأخیر میانه ${duration(median)}` : "");
+    add("سرعت انتشار (۲۴ ساعت)", "رقیبی نزده", none);
+  }
+  (rank?.rows ?? []).forEach((r, n) => add("مقایسه با رسانه‌های دیگر", r.ours ? "ما" : r.name, r.covered, `رتبه ${n + 1} · از ${hot.length} سوژه${r.first == null ? "" : ` · ${r.first} بار اول`}`));
+  if (desks.length > 1) desks.forEach((d) => add("پوشش به تفکیک میز", d.name, d.ours, `از ${d.all}`));
+  needStories.forEach((s) => add("الان باید دید", s.title, s.sources || s.channels || "", s.firstSource ?? "", s.items?.[0]?.url ?? ""));
+  taken.forEach((s) => add("تیم الان چه می‌نویسد", s.title, s.mark.by || "یکی از اعضا", s.ours ? "منتشر شد" : stalled(s) ? `${duration(waited(s))}، هنوز منتشر نشده` : "", s.items?.[0]?.url ?? ""));
+  (gaps ?? []).forEach((s) => add("شکاف پوشش", s.title, s.sources ?? "", `رقبا: ${(s.competitors ?? []).join("، ")}`, s.items?.[0]?.url ?? ""));
+  (trends ?? []).forEach((t) => add("ترند گوگل", t.title, t.traffic ?? ""));
+  setExport("داشبورد", ["بخش", "عنوان", "مقدار", "توضیح", "لینک"], sheet);
 
   main.innerHTML = staleNote(topics)
     + (missed ? `<section class="card missed"><h3>جا مانده‌ها</h3><div class="tiles">${missed}</div></section>` : "")
@@ -599,6 +634,7 @@ async function showDash(id) {
     section("پوشش به تفکیک میز", "topics", desks.length > 1 && `<div class="bars">${desks.map((d) => `<div class="bar-row">
       <span class="bar-label">${esc(d.name)}</span><span class="bar"><i style="width:${Math.round((100 * d.ours) / d.all)}%"></i></span>
       <span class="bar-val">${fa(d.ours)} از ${fa(d.all)}</span></div>`).join("")}</div>`) +
+    section(`مقایسه با رسانه‌های دیگر (${fa(prefs.hours)} ساعت)`, "topics", rankHtml) +
     section(`سوژه‌های داغ رسانه‌ها`, "topics", hot && bars(hot.slice(0, 5).map((s) => ({ label: s.title, href: s.items?.[0]?.url, value: s.sources,
       // beside the count, where the team stands on it: published, or a member writing it
       text: `${fa(s.sources)} منبع${s.ours ? ` <b class="has" title="در سایت شما">✓</b>` : s.mark?.status === "taken" ? ` <span title="می‌نویسد: ${esc(s.mark.by || "یکی از اعضا")}">✍</span>` : ""}` })))) +
@@ -977,8 +1013,7 @@ async function compareTitles(item, domain, now, out) {
   const hours = Math.min(24, Math.max(1, Math.ceil((Date.parse(now) - from) / 3600000 + 0.05)));
   const res = await newsApi(`topics?hours=${hours}&minSources=1`);
   if (res.status !== 200) { out.innerHTML = `<div class="muted">تیترها بارگذاری نشد.</div>`; return; }
-  const host = (d) => String(d ?? "").toLowerCase().replace(/^www\./, "");
-  const ours = (i) => i.url === item.url || host(i.domain) === host(domain);
+  const ours = (i) => i.url === item.url || newsHost(i.domain) === newsHost(domain);
   const story = (res.data.stories ?? []).find((s) => s.items?.some((i) => i.url === item.url || (ours(i) && newsFold(i.title) === newsFold(item.title))));
   const others = (story?.items ?? []).filter((i) => !i.telegram && !ours(i));
   if (!others.length) { out.innerHTML = `<div class="muted">تیتر سایت‌های دیگر برای این خبر پیدا نشد؛ شاید جزو ۶۰ سوژه پرمنبع این بازه نیست.</div>`; return; }
