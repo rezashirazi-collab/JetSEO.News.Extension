@@ -11,6 +11,10 @@ var NEWS_ACCOUNT_KEY = "newsAccount";
 var NEWS_PREFS_KEY = "newsPrefs";
 // «سوژه بی‌صاحب» is told when a gap or a watched story stayed free this long (background.js poll; the settings name it)
 var UNCLAIMED_MINUTES = 30;
+// The lists a watched word is looked for in (background.js poll): the sites' stories and those only Telegram tells, and
+// the foreign media's. The panel reads a clicked notification's stories from the same ones again (panel.js refreshTold).
+var NEWS_WATCH_PATHS = ["topics?hours=3&minSources=1", "telegram?mode=only&hours=3"];
+var NEWS_FOREIGN_WATCH_PATH = "foreign?hours=6";
 
 function newsLoginUrl() {
   return `${NEWS_SITE}/home/login?ReturnUrl=${encodeURIComponent("/extension/connected")}&utm_source=jetseo_news_extension&utm_medium=login`;

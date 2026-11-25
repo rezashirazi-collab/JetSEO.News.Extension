@@ -71,6 +71,7 @@ function staleNote(data) {
 function clearList() {
   setExport(null);
   focusBox.hidden = true;
+  toldBox.hidden = true;
   main.style.minHeight = "";
 }
 
@@ -140,9 +141,54 @@ async function takeGo() {
   });
   if (site) gapSite = site.id;
   pendingCheck = go.url ?? null;
+  showTold(go);
   show(go.tab);
   return true;
 }
+
+// A notification's click: the stories it told, over the list that opens, so they are the first thing in sight and need
+// no looking for. Each row is the dashboard's (headline, count, «من می‌نویسم»); it stays until closed or the next click.
+// The headlines show at once, as the background told them; the buttons come with refreshTold.
+const toldBox = document.getElementById("told");
+// the clicked notification's go while its stories are in sight
+let toldGo = null;
+function showTold(go) {
+  toldGo = go?.stories?.length ? go : null;
+  toldBox.hidden = !toldGo;
+  if (!toldGo) return;
+  drawTold(toldGo.stories.map(unmarked));
+  toldBox.scrollIntoView({ block: "nearest" });
+  refreshTold();
+}
+// a story as the background saw it, without its mark: no «من می‌نویسم» on it (takeButton)
+const unmarked = ({ mark, ...story }) => story;
+function drawTold(stories, now) {
+  toldBox.innerHTML = `<section class="card"><h3 class="head"><span>اعلان: ${esc(toldGo.title)}</span><a href="#" id="told-close">بستن</a></h3>
+    <ul class="need">${stories.map((s) => dashStory(s, `${takenBadge(s, now)}${s.ours ? `<span class="badge ok">در سایت شما</span>` : ""}`)).join("")}</ul></section>`;
+}
+// The rows were read when the notification was told, maybe an hour before its click, and api/News/mark overwrites: «من
+// می‌نویسم» on a story a colleague took since would take it from them. So a row gets its button only from the story as
+// the server has it now, read from the lists the background tells from (background.js poll; the foreign stories have
+// ids of their own, so they are looked for only there). A story on none of them any more keeps its headline alone.
+async function refreshTold() {
+  const go = toldGo;
+  if (!go || toldBox.hidden || !state?.access) return;
+  const prefs = await newsPrefs();
+  const paths = go.tab === "global" ? [NEWS_FOREIGN_WATCH_PATH] : [
+    ...(state.sites ?? []).filter((s) => s.hasFeed && s.competitors).map((s) => `gap?siteId=${s.id}&hours=${prefs.hours}`),
+    ...NEWS_WATCH_PATHS];
+  const answers = (await Promise.all(paths.map((p) => newsApi(p)))).filter((r) => r.status === 200);
+  // closed, or another notification clicked, meanwhile
+  if (go !== toldGo) return;
+  const fresh = new Map(answers.flatMap((r) => r.data.stories ?? []).map((s) => [String(s.id), s]));
+  drawTold(go.stories.map((s) => fresh.get(String(s.id)) ?? unmarked(s)), answers[0]?.data.now);
+}
+toldBox.addEventListener("click", (e) => {
+  if (!e.target.closest("#told-close")) return;
+  e.preventDefault();
+  toldGo = null;
+  toldBox.hidden = true;
+});
 
 function signedOut() {
   state = null;
@@ -348,15 +394,21 @@ let risingMinutes = 60;
 
 // «من می‌نویسم», «رد برای تیم» and their undo on a story: the team's mark (api/News/mark), then the list again, as every
 // member now sees it.
-main.addEventListener("click", async (e) => {
+async function onMark(e) {
   const b = e.target.closest("button[data-mark]");
   if (!b) return;
   b.disabled = true;
   const res = await newsApi(`mark?storyId=${encodeURIComponent(b.dataset.story)}&status=${encodeURIComponent(b.dataset.mark)}`, "POST");
-  if (res.status === 200) return show(tab);
+  if (res.status === 200) {
+    // the notification's stories show the new mark too, wherever it was set
+    refreshTold();
+    return show(tab);
+  }
   b.disabled = false;
   b.textContent = "ذخیره نشد";
-});
+}
+main.addEventListener("click", onMark);
+toldBox.addEventListener("click", onMark);
 
 // for JetSEO's use report (newsUsed): the category on screen, and when the open was last counted (one a half hour:
 // every filter change and mark draws the list again)

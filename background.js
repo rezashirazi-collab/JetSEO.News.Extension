@@ -124,7 +124,7 @@ async function poll(first) {
 
   // a watched word in a story the sites tell, or in one only Telegram channels tell so far
   const newWatch = [];
-  for (const path of ["topics?hours=3&minSources=1", "telegram?mode=only&hours=3"]) {
+  for (const path of NEWS_WATCH_PATHS) {
     const res = await newsApi(path);
     if (res.status !== 200) continue;
     for (const story of newsPersonal(res.data.stories, prefs).filter((s) => s.watch)) {
@@ -135,7 +135,7 @@ async function poll(first) {
 
   // and in a story of the foreign media («رسانه‌های خارجی»): a Latin word, «openai», matches the English headlines as it is
   if (state.data.foreignNews) {
-    const res = await newsApi("foreign?hours=6");
+    const res = await newsApi(NEWS_FOREIGN_WATCH_PATH);
     for (const story of res.status === 200 ? newsGlobal(res.data.stories, prefs).filter((s) => s.watch) : []) {
       if (!watchSeen.has(String(story.id))) newWatch.push({ ...story, tab: "global" });
     }
@@ -157,7 +157,7 @@ async function poll(first) {
   await chrome.storage.local.set({ newsWaiting: waiting });
   if (!quiet && overdue.length) {
     await notify(overdue.length === 1 ? "سوژه بی‌صاحب: هنوز کسی برنداشته" : `${overdue.length} سوژه بی‌صاحب: هنوز کسی برنداشته`,
-      overdue.slice(0, 3).map((s) => s.title).join("\n"), { tab: "dash" });
+      overdue.slice(0, 3).map((s) => s.title).join("\n"), { tab: "dash", stories: told(overdue) });
   }
 
   const notified = new Set(newsSeen.notified ?? []);
@@ -167,12 +167,12 @@ async function poll(first) {
       await notify(
         newGaps.length === 1 ? `رقبا زدند، شما نه (${top.site})` : `${newGaps.length} سوژه که رقبا زده‌اند و شما نه`,
         newGaps.slice(0, 3).map((g) => g.story.title).join("\n"),
-        { tab: "gap", siteId: top.siteId }
+        { tab: "gap", siteId: top.siteId, stories: told(newGaps.map((g) => g.story)) }
       );
     }
     if (prefs.notifyWatch && newWatch.length) {
       await notify(newWatch.length === 1 ? "کلیدواژه تحت نظر" : `${newWatch.length} سوژه با کلیدواژه تحت نظر`,
-        newWatch.slice(0, 3).map((s) => s.title).join("\n"), { tab: newWatch[0].tab });
+        newWatch.slice(0, 3).map((s) => s.title).join("\n"), { tab: newWatch[0].tab, stories: told(newWatch) });
     }
   }
   newGaps.forEach((g) => notified.add(g.key));
@@ -199,8 +199,16 @@ async function markGapSeen(keys) {
   await chrome.action.setBadgeText({ text: "" });
 }
 
-// go: where its click opens the app ({ tab, siteId })
+// The stories a notification tells, as much of each as the panel's row of it needs (panel.js showTold, dashStory): the
+// click opens the app with these very stories on top, whatever list is under them.
+const told = (stories) => stories.slice(0, 30).map((s) => ({
+  id: s.id, title: s.title, sources: s.sources, channels: s.channels, items: [{ url: s.items?.[0]?.url }],
+  ...("mark" in s ? { mark: s.mark } : {}),
+}));
+
+// go: where its click opens the app ({ tab, siteId, stories }); the title goes with it, as the heading of its stories
 async function notify(title, message, go) {
+  go = { ...go, title };
   const id = `news-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
   const keep = Object.entries(newsNotified).slice(-30);
