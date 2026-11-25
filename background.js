@@ -102,14 +102,19 @@ async function poll(first) {
   const watchSeen = new Set(newsSeen.watch);
   const newGaps = [];
   let unseenGaps = 0;
+  // for «سوژه بی‌صاحب»: the gaps and the watched stories with no mark of the team (neither taken nor dismissed) that no
+  // team's site has, by story id. Only from a server that sends the team's marks: without them every story would look free.
+  const open = new Map();
+  const free = (story) => { if ("mark" in story && !story.mark && !story.ours) open.set(String(story.id), story); };
 
   for (const site of state.data.sites ?? []) {
     if (!site.hasFeed || !site.competitors) continue;
-    const gap = await newsApi(`gap?siteId=${site.id}&hours=${prefs.gapHours}`);
+    const gap = await newsApi(`gap?siteId=${site.id}&hours=${prefs.hours}`);
     if (gap.status !== 200) continue;
     for (const story of newsPersonal(gap.data.stories, prefs)) {
       const key = `${site.id}:${story.id}`;
       if (skipped.has(key)) continue;
+      free(story);
       if (!gapSeen.has(key)) {
         unseenGaps++;
         if (!newsSeen.notified?.includes(key)) newGaps.push({ key, site: site.domain, siteId: site.id, story });
@@ -123,6 +128,7 @@ async function poll(first) {
     const res = await newsApi(path);
     if (res.status !== 200) continue;
     for (const story of newsPersonal(res.data.stories, prefs).filter((s) => s.watch)) {
+      free(story);
       if (!watchSeen.has(String(story.id)) && !newWatch.some((w) => w.id === story.id)) newWatch.push({ ...story, tab: path.startsWith("telegram") ? "telegram" : "topics" });
     }
   }
@@ -133,6 +139,25 @@ async function poll(first) {
     for (const story of res.status === 200 ? newsGlobal(res.data.stories, prefs).filter((s) => s.watch) : []) {
       if (!watchSeen.has(String(story.id))) newWatch.push({ ...story, tab: "global" });
     }
+  }
+
+  // «سوژه بی‌صاحب»: free for UNCLAIMED_MINUTES since this browser first saw it, told once. newsWaiting is
+  // { id: [first seen, told] }, kept only for the stories still free, so it empties itself.
+  const { newsWaiting = {} } = await chrome.storage.local.get("newsWaiting");
+  const waiting = {}, overdue = [];
+  if (prefs.notifyUnclaimed ?? state.data.access.role === "owner") {
+    for (const [id, story] of open) {
+      // on the quiet first round what is already there is the baseline, as with the gaps
+      const [since, told] = newsWaiting[id] ?? [Date.now(), quiet];
+      const due = !told && Date.now() - since >= UNCLAIMED_MINUTES * 60000;
+      if (due) overdue.push(story);
+      waiting[id] = [since, told || due];
+    }
+  }
+  await chrome.storage.local.set({ newsWaiting: waiting });
+  if (!quiet && overdue.length) {
+    await notify(overdue.length === 1 ? "سوژه بی‌صاحب: هنوز کسی برنداشته" : `${overdue.length} سوژه بی‌صاحب: هنوز کسی برنداشته`,
+      overdue.slice(0, 3).map((s) => s.title).join("\n"), { tab: "dash" });
   }
 
   const notified = new Set(newsSeen.notified ?? []);

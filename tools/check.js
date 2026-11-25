@@ -41,4 +41,80 @@ assert.strictEqual(ids(api.newsGlobal(stories, prefs())), "[1,3]");
 assert.strictEqual(ids(api.newsPersonal(stories, prefs({ watchOnly: false }))), "[1,2,3]");
 assert.strictEqual(ids(api.newsPersonal(stories, prefs({ watch: [] }))), "[1,2,3]");
 
+// «مقایسه با رسانه‌های دیگر»: a site once per story, first = the earliest site (not the channel ahead of it), the team's
+// sites one row whose covered is the server's ours, and no «first» for a team whose headlines are in no story
+const told = (domain, more) => ({ source: domain, domain, ...more });
+const hotStories = [
+  { sources: 3, ours: true, items: [told("t.me/x", { telegram: true }), told("a.ir"), told("www.Ours.ir"), told("a.ir"), told("b.ir")] },
+  { sources: 2, items: [told("b.ir"), told("a.ir")] },
+  { sources: 13, ours: true, items: [told("a.ir")] },
+];
+const rank = api.newsMediaRank(hotStories, ["ours.ir"]);
+assert.strictEqual(JSON.stringify(rank.rows.map((r) => [r.ours ? "ours" : r.name, r.covered, r.first])), '[["a.ir",3,2],["b.ir",2,1],["ours",2,0]]');
+assert.strictEqual(rank.cut, 1);
+// each row carries the stories it told (the dashboard's row opens those the team has not)
+assert.ok(rank.rows.every((r) => r.ours || r.stories.length === r.covered));
+assert.strictEqual(api.newsMediaRank(hotStories, ["other.ir"]).rows.find((r) => r.ours).first, null);
+
+// The story prompts (panel.js, which needs a browser: only the block from NO_ANGLES to addAngles is run here). Each
+// kind names its story and its links, says what only it says, and keeps one place for «مردم چه می‌پرسند؟».
+const panel = fs.readFileSync(path.join(__dirname, "..", "panel.js"), "utf8");
+const prompts = vm.createContext({ fa: (n) => String(n), esc: (s) => String(s) });
+vm.runInContext(panel.slice(panel.indexOf("const NO_ANGLES"), panel.indexOf("// the card's copy carries")) + "this.out = { storyPrompt, NO_ANGLES, PROMPT_OUTPUT, PROMPT_KINDS, PROMPT_FORMATS, promptAs };", prompts);
+const { storyPrompt, NO_ANGLES, PROMPT_OUTPUT, PROMPT_KINDS, PROMPT_FORMATS, promptAs } = prompts.out;
+const story = { title: "قیمت دلار", sources: 4, firstSource: "ایسنا", items: [{ source: "ایسنا", title: "دلار گران شد", url: "https://a.example/1" }],
+  competitors: ["رقیب یک", "رقیب دو"], covers: [{ source: "زومیت", title: "تیتر فارسی", url: "https://z.example/2" }] };
+const only = { new: "مطلب تازه و مستقل", update: "[نشانی یا متن مطلب خودتان را این‌جا بگذارید]", gap: "رقیب یک، رقیب دو", foreign: "https://z.example/2" };
+for (const kind of Object.keys(PROMPT_KINDS)) {
+  const text = storyPrompt(story, kind);
+  assert.strictEqual(text.split(NO_ANGLES).length, 2, kind);
+  for (const part of ["سوژه: قیمت دلار", "https://a.example/1", only[kind]]) assert.ok(text.includes(part), `${kind}: ${part}`);
+  assert.ok(!/undefined|\[object/.test(text), kind);
+  // another output: the story and the angles' place stay, the article's own output goes
+  for (const [format, f] of Object.entries(PROMPT_FORMATS)) {
+    const other = promptAs(text, format);
+    const [before, output, ...rest] = other.split(PROMPT_OUTPUT);
+    assert.strictEqual(rest.length, 0, `${kind}/${format}`);
+    assert.strictEqual(before, text.split(PROMPT_OUTPUT)[0], `${kind}/${format}`);
+    assert.ok(output.includes(f.output[0]) && !output.includes(PROMPT_KINDS[kind].output[0]), `${kind}/${format}`);
+  }
+}
+// a story with neither count (the card shows no count badge then) says nothing of one
+assert.ok(storyPrompt({ title: "t", firstSource: "ایسنا", items: [] }, "new").includes("سوژه: t\nاولین: ایسنا\n\n"));
+// a foreign story has no firstSource and may have no Persian headline
+assert.ok(storyPrompt({ title: "Nvidia", sources: 2, items: [{ source: "Reuters", title: "t", url: "https://r.example" }] }, "foreign").includes("اولین: Reuters"));
+
+// patch (panel.js, the dashboard's cards): a card that did not change stays the same element, one that changed is put
+// in anew, and what another tab drew goes. The DOM here is just big enough for it: a box of <section> elements.
+{
+  class El {
+    constructor(html) { this.outerHTML = html; this.parent = null; }
+    get isConnected() { return !!this.parent; }
+    remove() { if (this.parent) { this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; } }
+    before(el) { el.remove(); const p = this.parent; p.children.splice(p.children.indexOf(this), 0, el); el.parent = p; }
+  }
+  class Box {
+    constructor() { this.children = []; }
+    append(el) { el.remove(); this.children.push(el); el.parent = this; }
+    set textContent(v) { this.children.forEach((c) => (c.parent = null)); this.children = []; }
+    get html() { return this.children.map((c) => c.outerHTML).join(""); }
+  }
+  const document = { createElement: () => ({ set innerHTML(h) { const b = new Box(); (h.match(/<section>.*?<\/section>/g) || []).forEach((x) => b.append(new El(x))); this.content = b; } }) };
+  const text = panel.replace(/\r\n/g, "\n"), from = text.indexOf("function patch(box, html)");
+  const patch = new Function("document", text.slice(from, text.indexOf("\n}\n", from) + 3) + ";return patch")(document);
+  const box = new Box(), [A, B, C, B2] = ["a", "b", "c", "b2"].map((x) => `<section>${x}</section>`);
+  box.append(new El("<section>another tab</section>"));
+  patch(box, A + B + C);
+  assert.strictEqual(box.html, A + B + C);
+  const [a, b, c] = box.children;
+  patch(box, A + B2 + C);
+  assert.ok(box.html === A + B2 + C && box.children[0] === a && box.children[1] !== b && box.children[2] === c);
+  patch(box, A + C);
+  assert.ok(box.html === A + C && box.children[1] === c);
+  patch(box, B + A + C + B2);
+  assert.ok(box.html === B + A + C + B2 && box.children[1] === a && box.children[2] === c);
+  patch(box, "");
+  assert.strictEqual(box.html, "");
+}
+
 console.log("ok");

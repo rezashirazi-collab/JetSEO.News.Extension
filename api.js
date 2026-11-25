@@ -9,6 +9,8 @@ var NEWS_SITE = "https://www.jetseo.ir";
 var NEWS_API = "https://coreapi.jetseo.ir/api/News";
 var NEWS_ACCOUNT_KEY = "newsAccount";
 var NEWS_PREFS_KEY = "newsPrefs";
+// «سوژه بی‌صاحب» is told when a gap or a watched story stayed free this long (background.js poll; the settings name it)
+var UNCLAIMED_MINUTES = 30;
 
 function newsLoginUrl() {
   return `${NEWS_SITE}/home/login?ReturnUrl=${encodeURIComponent("/extension/connected")}&utm_source=jetseo_news_extension&utm_medium=login`;
@@ -44,7 +46,7 @@ async function newsConnect() {
 
 async function newsSignOut() {
   const account = await newsAccount();
-  await chrome.storage.local.remove([NEWS_ACCOUNT_KEY, "newsSeen", "newsState", "newsTopicSeen", "newsGapSkip"]);
+  await chrome.storage.local.remove([NEWS_ACCOUNT_KEY, "newsSeen", "newsState", "newsTopicSeen", "newsGapSkip", "newsWaiting"]);
   chrome.contextMenus.removeAll(() => chrome.runtime.lastError);
   if (account) {
     // revokes the token on the server; signing out here works even if this fails
@@ -108,13 +110,13 @@ async function newsPrefs() {
     topics: prefs.topics ?? [],
     notifyGap: prefs.notifyGap ?? true,
     notifyWatch: prefs.notifyWatch ?? true,
-    topicHours: prefs.topicHours ?? 3,
+    // stories nobody took after a while; unset = on for the subscription's owner, off for a member (background.js)
+    notifyUnclaimed: prefs.notifyUnclaimed,
+    // one period for the Persian story lists; before 0.10 each list had its own, and the hot stories' is kept
+    hours: prefs.hours ?? prefs.topicHours ?? 6,
     topicSort: prefs.topicSort ?? "top",
     topicHideOurs: prefs.topicHideOurs ?? false,
     minSources: prefs.minSources ?? 2,
-    gapHours: prefs.gapHours ?? 6,
-    telegramHours: prefs.telegramHours ?? 6,
-    mediaHours: prefs.mediaHours ?? 6,
     globalHours: prefs.globalHours ?? 24,
     globalCategory: prefs.globalCategory ?? "",
     globalSort: prefs.globalSort ?? "top",
@@ -178,6 +180,40 @@ function newsPersonal(stories, prefs) {
     .filter((s) => !prefs.topics.length || !("topic" in s) || s.watch || prefs.topics.includes(s.topic))
     // watch: one of the user's own words, or of the team's (set by the server)
     .filter((s) => !newsFocused(prefs) || s.watch);
+}
+
+const newsHost = (domain) => String(domain ?? "").toLowerCase().replace(/^www\./, "");
+
+// «مقایسه با رسانه‌های دیگر»: of the hot stories, how many each site told and how many it told first (among the sites; a
+// Telegram channel that was ahead is not counted). The team's own sites (ownDomains) are one row, ours: its covered is
+// the server's s.ours, and its first is null when none of its headlines is listed (a feed outside JetSEO's catalog is
+// in no story's items, so who was first cannot be told). Most covered first, then most often first.
+// ponytail: a story lists its 12 earliest sites only, so a site that came later to a story of more (cut counts those
+// stories) is not counted for it, and only the 60 hottest stories are sent; an api/News endpoint that counts on the
+// server would be exact and could go back days.
+function newsMediaRank(stories, ownDomains) {
+  const own = new Set((ownDomains ?? []).map(newsHost));
+  const rows = new Map();
+  const row = (key, name) => rows.get(key) ?? rows.set(key, { name, ours: key === "", covered: 0, first: 0, stories: [] }).get(key);
+  let ownListed = false, cut = 0;
+  for (const s of stories ?? []) {
+    if (s.sources > 12) cut++;
+    const told = new Set();
+    (s.items ?? []).filter((i) => !i.telegram).forEach((i, n) => {
+      const key = own.has(newsHost(i.domain)) ? "" : newsHost(i.domain);
+      if (told.has(key)) return;
+      told.add(key);
+      const r = row(key, i.source);
+      r.covered++;
+      r.stories.push(s);
+      if (n === 0) r.first++;
+      if (!key) ownListed = true;
+    });
+    if (s.ours && !told.has("")) row("", "").covered++;
+  }
+  const ours = rows.get("");
+  if (ours && !ownListed) ours.first = null;
+  return { cut, rows: [...rows.values()].sort((a, b) => b.covered - a.covered || (b.first ?? 0) - (a.first ?? 0)) };
 }
 
 // A list as the text of a CSV file («خروجی»): a BOM so that Excel reads the Persian, CRLF rows, quotes doubled.
