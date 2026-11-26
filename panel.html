@@ -11,15 +11,16 @@
     <img src="icons/icon-32.png" alt="" width="22" height="22" />
     <strong>جت‌سئو نیوز</strong>
     <span id="who" class="muted"></span>
-    <div id="view" class="seg" role="group" aria-label="حالت نمایش">
-      <button type="button" data-view="tab">صفحه کامل</button>
-      <button type="button" data-view="panel">پنل کناری</button>
-    </div>
+    <!-- the buttons say what they do: an editor does not read ⟳ and ⚙. The sign-out is in «تنظیمات» -->
+    <!-- to the other view (the full page from the side panel, and back); panel.js names it -->
+    <button id="view" class="icon" type="button"></button>
     <!-- shown by panel.js (setExport) while the list on screen has rows to save -->
-    <button id="export" class="icon" type="button" title="خروجی این فهرست به صورت فایل (CSV، قابل باز کردن در اکسل)" aria-label="اکسل: خروجی فایل از این فهرست" hidden>⬇ اکسل</button>
-    <button id="refresh" class="icon" type="button" title="به‌روزرسانی" aria-label="به‌روزرسانی">⟳</button>
-    <button id="settings" class="icon" type="button" title="تنظیمات" aria-label="تنظیمات" hidden>⚙</button>
+    <button id="export" class="icon" type="button" title="فهرستی که می‌بینید به صورت فایل ذخیره می‌شود و در اکسل باز می‌شود" hidden>ذخیره در اکسل</button>
+    <button id="refresh" class="icon" type="button" title="خبرها دوباره خوانده می‌شوند">تازه‌سازی</button>
+    <button id="settings" class="icon" type="button" hidden>تنظیمات</button>
   </header>
+  <!-- a short word on what was just done, with its way back (panel.js toast) -->
+  <div id="toast" role="status" hidden></div>
   <div id="banner" hidden></div>
   <div id="whatsnew" hidden></div>
   <!-- the four sections; panel.js fills both rows from what the account may open (renderNav) -->
