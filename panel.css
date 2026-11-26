@@ -186,12 +186,9 @@ textarea { width: 100%; min-height: 60px; border: 1px solid var(--line); border-
 .guide li.done b { color: var(--ok) }
 /* «چه چیزی تازه است», once after an update */
 #whatsnew { margin: 10px 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--brand-soft); border: 1px solid var(--line) }
-#export { width: auto; padding-inline: 8px; white-space: nowrap; font: inherit }
 details.about { margin: 0 0 10px }
 details.about summary { cursor: pointer; list-style: none }
 .legend-list li { margin: 4px 0 }
-/* the save button stays in sight on the long settings page */
-.savebar { position: sticky; inset-block-end: 0; padding: 8px 0; background: var(--bg) }
 #focus { margin: 10px 10px 0; padding: 6px 12px; border-radius: 10px; background: var(--brand-soft); border: 1px solid var(--line); overflow-wrap: anywhere }
 body.page #focus { max-width: 1200px; margin: 12px auto 0 }
 /* the stories of the clicked notification, over the list */
@@ -242,3 +239,37 @@ body.page main { max-width: none; margin: 0 }
   .badge.watch { color: #fcd34d } .badge.ok { color: #86efac } .badge.late { color: #fca5a5 } .badge.trend { color: #c4b5fd }
   .badge.tg { color: #7dd3fc } .badge.media { color: #f9a8d4 } .badge.new { color: #fdba74 } .badge.topic { color: #6ee7b7 }
 }
+/* the header's buttons are words («تازه‌سازی», «تنظیمات», «ذخیره در اکسل») */
+.top .icon { width: auto; padding-inline: 8px; white-space: nowrap; font-size: 12px }
+/* the side panel has no width for the names beside four buttons: Chrome writes the extension's name over the panel, and the member's is in «تنظیمات» */
+body:not(.page) #who, body:not(.page) .top strong { display: none }
+body:not(.page) .top img { margin-inline-end: auto }
+/* the one filled button of a story («من می‌نویسم») beside its quiet ones */
+.acts .btn:not(.ghost), .need .btn:not(.ghost) { font-weight: 700 }
+/* what a clicked badge means, and where a copied text goes: a line of its own under the badge's line */
+.badge[title] { cursor: help }
+.hint { flex: 1 1 100%; margin-top: 4px; padding: 4px 10px; border-radius: 8px; background: var(--brand-soft); color: var(--text); font-size: 12px; font-weight: 400 }
+/* «دنبال کن» under a story's «جزئیات», and a list of words in the settings */
+.follow, .words .add { display: flex; gap: 6px; margin-top: 8px }
+.follow input, .words .add input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 2px 8px }
+.follow .btn, .words .add .btn { margin: 0; white-space: nowrap }
+.words { margin-top: 12px }
+.words .chips { margin: 6px 0 0 }
+.chip.word { display: inline-flex; align-items: center; gap: 2px; background: var(--brand-soft); border-color: transparent; padding-inline: 10px 2px; font-size: 12.5px }
+.chip.word button { border: 0; background: none; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 8px; color: var(--muted) }
+.chip.word button:hover { color: var(--bad); background: var(--bad-bg) }
+/* «نقش من»: the first question, and the same choice in the settings */
+.role-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin-top: 10px }
+.role { display: flex; flex-direction: column; align-items: flex-start; text-align: start; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); cursor: pointer }
+.role b { font-size: 14px }
+.role:hover { border-color: var(--brand); box-shadow: var(--shadow-up) }
+.role.on { border-color: var(--brand); background: var(--brand-soft) }
+.card.roles { max-width: 720px; margin: 24px auto; padding: 18px }
+.card.roles h3 { font-size: 16px }
+/* a reporter's dashboard: its numbers in one line */
+.dash-line { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: var(--card); border: 1px solid var(--line) }
+.dash-line a { text-decoration: none; font-weight: 600 }
+.dash-line a:hover { text-decoration: underline }
+/* what a click just did, at the foot of the page */
+#toast { position: fixed; inset-block-end: 14px; inset-inline: 0; margin-inline: auto; width: fit-content; max-width: calc(100% - 24px); z-index: 3; padding: 6px 14px; border-radius: 10px; background: var(--text); color: var(--bg); box-shadow: var(--shadow-up) }
+#toast a { color: inherit; font-weight: 700; margin-inline-start: 8px }

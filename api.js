@@ -131,6 +131,8 @@ async function newsPrefs() {
     globalSort: prefs.globalSort ?? "top",
     // lists the user switched off in «تنظیمات» (panel.js TAB_NAMES keys)
     hiddenTabs: prefs.hiddenTabs ?? [],
+    // «نقش من» (panel.js ROLES): chosen the first time, it set hiddenTabs then; null = never asked (an older version's user)
+    role: prefs.role ?? null,
     // off by default: «seen in Persian media» is a match on Latin names only, too weak to hide a story unasked
     globalHideSeen: prefs.globalHideSeen ?? false,
   };
@@ -179,6 +181,13 @@ async function newsAlertLists(state, prefs) {
   }
   if (state.foreignNews) lists.foreign = await read(NEWS_FOREIGN_WATCH_PATH);
   return answered ? lists : null;
+}
+
+// The member has settings of their own: false only until the first one is saved, which is when the panel asks their role.
+async function newsPrefsStored() {
+  // a storage that does not answer must not ask the role again at every opening
+  const stored = await chrome.storage.sync.get(NEWS_PREFS_KEY).catch(() => null);
+  return !stored || NEWS_PREFS_KEY in stored;
 }
 
 async function saveNewsPrefs(changes) {
