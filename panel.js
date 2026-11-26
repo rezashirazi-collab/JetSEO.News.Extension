@@ -330,11 +330,15 @@ exportButton.onclick = () => {
 };
 // the server's local time, «2026-11-23T10:12:00», as a spreadsheet reads it
 const csvTime = (at) => String(at ?? "").replace("T", " ").slice(0, 16);
+// «کلیدواژه: تولید»: the watched word that marked a story or post (s.watchWord: the server's for the team's words, api.js
+// newsWithWatch for the user's own); an older server sends none
+const watchText = (s) => (s.watchWord ? `کلیدواژه: ${s.watchWord}` : "کلیدواژه تحت نظر");
+const watchBadge = (s) => `<span class="badge watch" title="کلیدواژه تحت نظر">${esc(watchText(s))}</span>`;
 // A Persian story as a row; `more` = the columns of the list it is in (a gap's competitors, the media made for it).
 const STORY_HEADER = ["تیتر", "تعداد سایت", "تعداد کانال تلگرام", "اولین منبع", "اولین انتشار", "موضوع", "برچسب‌ها", "لینک", "منابع"];
 const storyRow = (s, more = []) => [
   s.title, s.sources ?? 0, s.channels ?? 0, s.firstSource ?? "", csvTime(s.firstAt), topicName(s.topic) ?? "",
-  [s.watch ? "کلیدواژه تحت نظر" : "", s.ours ? "در سایت شما" : "", s.mark?.status === "taken" ? `می‌نویسد: ${s.mark.by || "یکی از اعضا"}` : "",
+  [s.watch ? watchText(s) : "", s.ours ? "در سایت شما" : "", s.mark?.status === "taken" ? `می‌نویسد: ${s.mark.by || "یکی از اعضا"}` : "",
     s.telegramLead > 0 ? "اول در تلگرام" : "", s.trend ? `ترند ${s.trend.source}: ${s.trend.text}` : ""].filter(Boolean).join("، "),
   s.items?.[0]?.url ?? "", (s.items ?? []).map((i) => i.source).join("، "), ...more,
 ];
@@ -495,7 +499,7 @@ function storyCard(s, now, extra = {}) {
     count: s.sources ? `<span class="badge">${fa(s.sources)} منبع</span>` : s.channels ? `<span class="badge">${fa(s.channels)} کانال</span>` : "",
     badges: [
       takenBadge(s, now),
-      s.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : "",
+      s.watch ? watchBadge(s) : "",
       s.ours ? `<span class="badge ok" title="یکی از سایت‌های تیم این سوژه را منتشر کرده است">در سایت شما</span>` : "",
       s.recent >= 2 ? `<span class="badge new" title="منابعی که در ${fa(risingMinutes)} دقیقه اخیر این سوژه را زده‌اند">${fa(s.recent)} منبع تازه</span>` : "",
       s.fresh ? `<span class="badge new">جدید</span>` : "",
@@ -590,9 +594,8 @@ async function showDash(id) {
     need.push(dashStory(s, badges(s)));
     needStories.push(s);
   });
-  const watchBadge = `<span class="badge watch">کلیدواژه تحت نظر</span>`;
-  addNeed(hot, (s) => s.watch, () => watchBadge);
-  addNeed(tgOnly, (s) => s.watch, () => `${watchBadge}<span class="badge tg">فقط در تلگرام</span>`);
+  addNeed(hot, (s) => s.watch, watchBadge);
+  addNeed(tgOnly, (s) => s.watch, (s) => `${watchBadge(s)}<span class="badge tg">فقط در تلگرام</span>`);
   addNeed(gaps, () => true, (s) => `<span class="badge late">رقبا زده‌اند: ${esc((s.competitors ?? []).join("، "))}</span>`);
   addNeed(hot && [...hot].sort((x, y) => (y.recent ?? 0) - (x.recent ?? 0)), (s) => s.recent >= 2,
     (s) => `<span class="badge new">${fa(s.recent)} منبع تازه</span>`);
@@ -958,7 +961,7 @@ function globalCard(s, now, risingHours) {
     badges: [
       takenBadge(s, now),
       dismissed ? `<span class="badge">رد شده: ${esc(s.mark.by || "یکی از اعضا")} · ${ago(s.mark.at, now)}</span>` : "",
-      s.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : "",
+      s.watch ? watchBadge(s) : "",
       ours.length ? `<span class="badge ok" title="نام‌های لاتین این سوژه در تیتر یکی از سایت‌های تیم هست">در سایت شما</span>`
         : covers.length ? `<span class="badge ok" title="نام‌های لاتین این سوژه در تیتر یک رسانه فارسی هست">در رسانه فارسی دیده شد</span>` : "",
       s.recent >= 2 ? `<span class="badge new" title="منابعی که در ${fa(risingHours)} ساعت اخیر این سوژه را زده‌اند">${fa(s.recent)} منبع تازه</span>` : "",
@@ -1469,14 +1472,14 @@ async function showTelegram(id) {
   if (res.status !== 200) { list.innerHTML = `<div class="empty">بارگذاری نشد. ⟳ را بزنید.</div>`; return; }
   if (mode === "trend") {
     const posts = (res.data.posts ?? []).filter((p) => !prefs.muted.includes(String(p.domain ?? "").toLowerCase()))
-      .map((p) => (!p.watch && newsWatched(p.title, prefs) ? { ...p, watch: true } : p))
+      .map((p) => newsWithWatch(p, prefs))
       .filter((p) => !newsFocused(prefs) || p.watch);
     setExport("ترند تلگرام", ["پست", "کانال", "بازدید", "بازدید در ساعت", "برابر معمول کانال", "زمان", "لینک"],
       posts.map((p) => [p.title, p.channel, p.views, p.perHour, p.relative, csvTime(p.at), p.url]));
     list.innerHTML = staleNote(res.data) + `<p class="muted">پست‌هایی که بازدیدشان از معمولِ همان کانال تندتر بالا می‌رود.</p>` + (posts.length ? posts.map((p) => `<article class="card">
       <h3><a href="${safeUrl(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></h3>
       <div class="meta"><span class="badge late">${fa(p.relative)} برابر معمول کانال</span><span class="badge">${fa(p.perHour)} بازدید در ساعت</span>
-        ${p.watch ? `<span class="badge watch">کلیدواژه تحت نظر</span>` : ""}
+        ${p.watch ? watchBadge(p) : ""}
         <span>${esc(p.channel)} · ${fa(p.views)} بازدید · ${ago(p.at, res.data.now)}</span></div>
     </article>`).join("") : `<div class="empty">${emptyText(prefs, "هنوز پستی دو بار خوانده نشده است؛ چند دقیقه بعد دوباره ببینید.")}</div>`);
     return;
@@ -1843,7 +1846,7 @@ async function showSettings() {
         <li><span class="badge">۵ منبع</span> چند سایت این سوژه را منتشر کرده‌اند.</li>
         <li><span class="badge new">۳ منبع تازه</span> سایت‌هایی که در یک ساعت اخیر به این سوژه پیوسته‌اند؛ یعنی سوژه در حال داغ شدن است.</li>
         <li><span class="badge new">جدید</span> از آخرین باری که فهرست را دیدید اضافه شده است.</li>
-        <li><span class="badge watch">کلیدواژه تحت نظر</span> یکی از کلمه‌هایی که شما یا تیم دنبال می‌کنید در تیتر هست.</li>
+        <li><span class="badge watch">کلیدواژه: …</span> یکی از کلمه‌هایی که شما یا تیم دنبال می‌کنید در تیتر اصلی سوژه هست، یا در تیتر دست‌کم دو منبع؛ خود کلمه روی برچسب می‌آید.</li>
         <li><span class="badge ok">در سایت شما</span> سایت خودتان این سوژه را منتشر کرده است.</li>
         <li><span class="badge tg">اول در تلگرام</span> کانال‌های تلگرام زودتر از سایت‌ها این خبر را گفته‌اند.</li>
         <li><span class="badge tg">می‌نویسد: نام</span> یکی از اعضای تیم «من می‌نویسم» را زده و روی این سوژه کار می‌کند.</li>
