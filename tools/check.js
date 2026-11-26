@@ -44,6 +44,15 @@ assert.strictEqual(ids(api.newsGlobal(stories, prefs())), "[1,3]");
 assert.strictEqual(ids(api.newsPersonal(stories, prefs({ watchOnly: false }))), "[1,2,3]");
 assert.strictEqual(ids(api.newsPersonal(stories, prefs({ watch: [] }))), "[1,2,3]");
 
+// a watched word marks a story in its main headline or in two sources' headlines, not in one other source's alone,
+// and the word comes along for the badge
+const told2 = (title, ...others) => ({ title, items: [title, ...others].map((t, i) => ({ title: t, domain: `${i}.ir` })) });
+const watchWord = (s) => api.newsPersonal([s], prefs({ watch: ["تولید", "کالابرگ"], watchOnly: false }))[0].watchWord ?? null;
+assert.strictEqual(watchWord(told2("کالابرگ گروه سوم شارژ شد")), "کالابرگ");
+assert.strictEqual(watchWord(told2("قدرت تخریب موشک‌ها را بالا می‌بریم", "تولید موشک افزایش یافت")), null);
+assert.strictEqual(watchWord(told2("رکورد گندم", "تولید گندم بالا رفت", "رکورد تولید")), "تولید");
+assert.strictEqual(api.newsPersonal([{ ...told2("خبر"), watch: true, watchWord: "تیم" }], prefs())[0].watchWord, "تیم");
+
 // «مقایسه با رسانه‌های دیگر»: a site once per story, first = the earliest site (not the channel ahead of it), the team's
 // sites one row whose covered is the server's ours, and no «first» for a team whose headlines are in no story
 const told = (domain, more) => ({ source: domain, domain, ...more });

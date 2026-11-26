@@ -151,11 +151,21 @@ function newsMatches(foldedText, word) {
   return w.length > 0 && ` ${foldedText} `.includes(` ${w} `);
 }
 
-// One of the user's own watched words in a headline.
-function newsWatched(title, prefs) {
-  const folded = newsFold(title);
-  return prefs.watch.some((w) => newsMatches(folded, w));
+// The user's own watched word that marks a story, null for none: one in its main headline, or in the headlines of at least
+// two of its sources (items: one headline a source). Any one headline of a dozen was too loose: «تولید» marked a missile
+// story because one source wrote «تولید موشک». The server marks the team's words by the same rule (CoreApi
+// NewsData.WatchedWordOf).
+function newsWatchWord(title, items, prefs) {
+  const main = newsFold(title);
+  const folded = (items ?? []).map((i) => newsFold(i.title));
+  return prefs.watch.find((w) => newsMatches(main, w) || folded.filter((t) => newsMatches(t, w)).length >= 2) ?? null;
 }
+
+// A story or post with watch and watchWord for one of the user's own words; one the server marked for the team's keeps its word.
+const newsWithWatch = (s, prefs) => {
+  const word = s.watch ? null : newsWatchWord(s.title, s.items, prefs);
+  return word ? { ...s, watch: true, watchWord: word } : s;
+};
 
 // «فقط کلیدواژه‌های من» is on: only with words of the user's own, or every list would be empty.
 const newsFocused = (prefs) => !!prefs.watchOnly && prefs.watch.length > 0;
@@ -166,7 +176,7 @@ const newsFocused = (prefs) => !!prefs.watchOnly && prefs.watch.length > 0;
 function newsGlobal(stories, prefs, showDismissed = false) {
   return (stories ?? [])
     .filter((s) => showDismissed || s.mark?.status !== "dismissed")
-    .map((s) => (!s.watch && (s.items ?? []).some((i) => newsWatched(i.title, prefs)) ? { ...s, watch: true } : s))
+    .map((s) => newsWithWatch(s, prefs))
     .filter((s) => !newsFocused(prefs) || s.watch);
 }
 
@@ -180,7 +190,7 @@ function newsPersonal(stories, prefs) {
     .map((s) => ({ ...s, items: (s.items ?? []).filter((i) => !muted.has(String(i.domain).toLowerCase())) }))
     .filter((s) => s.items.length > 0)
     .filter((s) => !s.items.some((i) => prefs.excluded.some((w) => newsMatches(newsFold(i.title), w))))
-    .map((s) => (!s.watch && [s.title, ...s.items.map((i) => i.title)].some((t) => newsWatched(t, prefs)) ? { ...s, watch: true } : s))
+    .map((s) => newsWithWatch(s, prefs))
     .filter((s) => !prefs.topics.length || !("topic" in s) || s.watch || prefs.topics.includes(s.topic))
     // watch: one of the user's own words, or of the team's (set by the server)
     .filter((s) => !newsFocused(prefs) || s.watch);
