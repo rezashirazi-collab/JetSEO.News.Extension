@@ -23,7 +23,7 @@ A Chrome extension for news editors and journalists, by [JetSEO](https://www.jet
 - **مناسبت‌ها:** today, tomorrow or the day after from Wikipedia's day pages: events, births and deaths with how many years ago (round anniversaries first) and the world days.
 - **تنظیمات:** your own filters and alerts. «فقط سوژه‌های همین کلیدواژه‌ها را نشان بده» keeps the dashboard, the hot stories, the coverage gap, Telegram, multimedia and the foreign media to the stories with one of your watched words (or the team's) in a headline, for a member who follows a few subjects only; the hot stories then also list what one site alone told. A line over those lists says which words, with «نمایش همه سوژه‌ها». The trends and «مطالب ما» stay as they are; with no word of your own it does nothing.
 
-While Chrome is open, the extension checks every 5 minutes and notifies new coverage gaps and stories with a watched keyword (the team's, or the user's own from «تنظیمات»), also those only on Telegram. A notification's click opens the extension on that tab. «سوژه بی‌صاحب» (on for the subscription's owner, a member can switch it on in «تنظیمات»): a coverage gap or a watched story that nobody took and no team's site has, 30 minutes after this browser first saw it (`UNCLAIMED_MINUTES`), told once; its click opens the dashboard.
+While Chrome is open, the extension checks every 5 minutes and notifies new coverage gaps and stories with a watched keyword (the team's, or the user's own from «تنظیمات»), also those only on Telegram. A notification's click opens the extension on that tab. «سوژه بی‌صاحب» (on for the subscription's owner, a member can switch it on in «تنظیمات»): a coverage gap or a watched story that nobody took and no team's site has, 30 minutes after this browser first saw it (`UNCLAIMED_MINUTES`), told once; its click opens the dashboard. A notification of one story nobody marked has a «من می‌نویسم» button: the story is read again and marked only while it is still free, and the notification then says what happened. «ساعت سکوت» in «تنظیمات» (from an hour to an hour of the computer's clock, over midnight too) tells nothing, and what came then is not told afterwards; the icon's number and the lists still have it.
 
 Also:
 - Hot stories not on the list the last time it was in sight are marked «جدید»; a search box filters the headlines.
@@ -35,6 +35,8 @@ Also:
 - Right-click a page of one of the team's sites, or a link to one: «بررسی سئوی این خبر» opens «مطالب ما» with its news SEO check.
 - A list drawn again (a mark, a filter, ⟳, the 3-minute refresh) stays at the scroll position it was read at, with the «جزئیات» that were open; the refresh waits while the answers of «مردم چه می‌پرسند؟» are open on a card. «تنظیمات» has «راهنمای برچسب‌ها و دکمه‌ها», what each badge and button means.
 - Alt+Shift+N opens the extension (changeable in `chrome://extensions/shortcuts`).
+- On a list of stories: `J` / `K` the next / the last card (its headline gets the focus, `Enter` opens the article), `W` «من می‌نویسم» or «منصرف شدم», `/` the search box. By the key's place, so they work with the Persian layout on.
+- A list that did not load for want of a connection says so, and is read again when the browser is back online.
 
 The hot stories, the coverage gap, Telegram and the alerts come with the «جت‌سئو نیوز» module, bought in the JetSEO panel (`/panel/NewsModule`). There the subscription owner also manages team members, sites, competitors and team filters. Google Trends, Wikipedia trends and the occasions are free for every signed-in JetSEO user.
 
@@ -55,8 +57,9 @@ Chrome 116 or later.
 | `api.js` | The account (sign-in hand-off, token), calls to the JetSEO API, personal preferences, and the text folding the server's filters use. |
 | `background.js` | Finishes the sign-in when jetseo.ir's `/extension/connected` page opens. Every 5 minutes: alerts, the number of unseen gaps on the icon, and the right-click menu for the team's sites. Opens the app on a tab for a menu or notification click (`newsGo` in `storage.session`). |
 | `panel.html`, `panel.css`, `panel.js` | The side panel. Every value from the server is escaped (`esc`); links must be `http(s)` (`safeUrl`). |
+| `lib.js` | The panel's rules that need no page (the story prompts, a headline's media kind, a phrase's type, what a headline lacks), so `tools/check.js` can run them. Loaded between `api.js` and `panel.js`. |
 | `fonts/` | Vazirmatn Regular and Bold (SIL Open Font License, `Vazirmatn-OFL.txt`). |
-| `tools/check.js` | `node tools/check.js`: the checks of `api.js` that need no browser (the CSV of «خروجی», the text folding). |
+| `tools/check.js` | `node tools/check.js`: the checks of `api.js` and `lib.js` that need no browser (the CSV of «خروجی», the text folding, the alerts' lists, the quiet hours, the prompts). |
 | `tools/pack.ps1` | Builds the release zip (forward-slash paths, as the Chrome Web Store requires). |
 
 ## How it talks to JetSEO
@@ -66,6 +69,7 @@ Chrome 116 or later.
   - `state`: who you are for the module (owner, member or none), your tier and end date, and the team's sites.
   - `topics?hours=&minSources=`: hot stories, with the team filters already applied.
   - `gap?siteId=&hours=`: a site's coverage gap.
+  - `alerts?hours=`: what a round of the alerts reads, in one answer: `gaps` (per site with a feed and competitors), `topics` and `telegram` (the lists a watched word is looked for in) and `foreign` (null without it). A server without it answers 404, and the lists are then asked one by one (`newsAlertLists`).
   - `mine?siteId=&hours=`: the site's own articles, with each one's lag behind the first competitor.
   - `check?url=`: news SEO check of one article, for the team's own sites only.
   - `telegram?mode=only|trend&hours=`: stories only channels told, or the fastest-spreading posts.

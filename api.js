@@ -13,6 +13,8 @@ var NEWS_PREFS_KEY = "newsPrefs";
 var UNCLAIMED_MINUTES = 30;
 // The lists a watched word is looked for in (background.js poll): the sites' stories and those only Telegram tells, and
 // the foreign media's. The panel reads a clicked notification's stories from the same ones again (panel.js refreshTold).
+// A server with api/News/alerts answers the same lists in one request and holds these hours itself (CoreApi
+// NewsController AlertWatchHours, AlertForeignHours): a change here is a change there.
 var NEWS_WATCH_PATHS = ["topics?hours=3&minSources=1", "telegram?mode=only&hours=3"];
 var NEWS_FOREIGN_WATCH_PATH = "foreign?hours=6";
 
@@ -116,6 +118,9 @@ async function newsPrefs() {
     notifyWatch: prefs.notifyWatch ?? true,
     // stories nobody took after a while; unset = on for the subscription's owner, off for a member (background.js)
     notifyUnclaimed: prefs.notifyUnclaimed,
+    // «ساعت سکوت»: hours 0-23 of this computer's clock between which nothing is notified (newsMuted); null = none
+    quietFrom: prefs.quietFrom ?? null,
+    quietTo: prefs.quietTo ?? null,
     // one period for the Persian story lists; before 0.10 each list had its own, and the hot stories' is kept
     hours: prefs.hours ?? prefs.topicHours ?? 6,
     topicSort: prefs.topicSort ?? "top",
@@ -129,6 +134,51 @@ async function newsPrefs() {
     // off by default: «seen in Persian media» is a match on Latin names only, too weak to hide a story unasked
     globalHideSeen: prefs.globalHideSeen ?? false,
   };
+}
+
+// «ساعت سکوت» holds at this hour (0-23): from quietFrom up to quietTo, over midnight when from is the later one
+// (22 to 7). Unset, or both the same hour: none.
+function newsMuted(prefs, hour) {
+  const { quietFrom: from, quietTo: to } = prefs;
+  if (from == null || to == null || from === to) return false;
+  return from < to ? hour >= from && hour < to : hour >= from || hour < to;
+}
+
+// The lists a round of alerts is made of (background.js pollOnce; a clicked notification's stories are read from them
+// again): { now, gaps: [{ site: { id, domain }, stories }], watch: [{ tab, stories }], foreign: stories or null }.
+// One request to a server with api/News/alerts. One without it (404), or whose alerts fails (a 5xx must not silence
+// every alert while the lists themselves answer), is asked list by list, where a list that fails is left out.
+// null when nothing answers (no network, signed out, or every list failed): the round then changes nothing.
+async function newsAlertLists(state, prefs) {
+  const all = await newsApi(`alerts?hours=${prefs.hours}`);
+  if (all.status === 200) {
+    return {
+      now: all.data.now,
+      gaps: (all.data.gaps ?? []).map((g) => ({ site: { id: g.siteId, domain: g.domain }, stories: g.stories })),
+      watch: [{ tab: "topics", stories: all.data.topics }, { tab: "telegram", stories: all.data.telegram }],
+      foreign: all.data.foreign ?? null,
+    };
+  }
+  if ([0, 401, 403].includes(all.status)) return null;
+  const lists = { now: null, gaps: [], watch: [], foreign: null };
+  let answered = false;
+  const read = async (path) => {
+    const res = await newsApi(path);
+    if (res.status !== 200) return null;
+    answered = true;
+    lists.now ??= res.data.now;
+    return res.data.stories ?? [];
+  };
+  for (const site of (state.sites ?? []).filter((s) => s.hasFeed && s.competitors)) {
+    const stories = await read(`gap?siteId=${site.id}&hours=${prefs.hours}`);
+    if (stories) lists.gaps.push({ site, stories });
+  }
+  for (const path of NEWS_WATCH_PATHS) {
+    const stories = await read(path);
+    if (stories) lists.watch.push({ tab: path.startsWith("telegram") ? "telegram" : "topics", stories });
+  }
+  if (state.foreignNews) lists.foreign = await read(NEWS_FOREIGN_WATCH_PATH);
+  return answered ? lists : null;
 }
 
 async function saveNewsPrefs(changes) {
