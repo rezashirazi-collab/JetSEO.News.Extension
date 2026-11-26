@@ -6,8 +6,31 @@ const vm = require("node:vm");
 
 // api.js is a plain script of top-level declarations, no module (the background loads it with importScripts): its
 // functions become the context's own
-const api = vm.createContext({});
+const api = vm.createContext({ URL });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "api.js"), "utf8"), api);
+// lib.js: the panel's rules that need no page, on top of api.js as in panel.html
+vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "lib.js"), "utf8"), api);
+
+// «ساعت سکوت»: from up to to, over midnight when from is the later hour; unset or both the same = none
+const muted = (quietFrom, quietTo) => [0, 6, 7, 12, 21, 22, 23].filter((h) => api.newsMuted({ quietFrom, quietTo }, h)).join();
+assert.strictEqual(muted(22, 7), "0,6,22,23");
+assert.strictEqual(muted(7, 22), "7,12,21");
+assert.strictEqual(muted(null, 7) + muted(9, 9), "");
+
+// «مقایسه تیتر»: the words at least half the other headlines (and two) use and ours does not; folded, no stop words
+assert.strictEqual(JSON.stringify(api.headlineGap("دلار گران شد", ["قیمت دلار در بازار", "قيمت دلار امروز", "بازار ارز و قیمت سکه"])), '[["قیمت",3],["بازار",2]]');
+
+// «چندرسانه‌ای»: the kind from the headline's marker, else from the URL's section; a word inside a headline is no marker
+const kind = (title, url = "https://a.ir/news/1") => api.mediaKind({ title, url });
+assert.deepStrictEqual([kind("فیلم/ لحظه گل"), kind("بازدید وزیر + تصاویر"), kind("تولید فیلم تازه آغاز شد"), kind("خبر", "https://a.ir/video/1"), kind("خبر", "نشانی")],
+  ["video", "photo", null, "video", null]);
+
+// «کلمات پرجستجو»: a question word wins, then the server's informational or an informational word
+assert.deepStrictEqual([api.keywordType("يارانه چيست", false), api.keywordType("علت قطعی برق", false), api.keywordType("خرید دلار", true), api.keywordType("خرید دلار", false)],
+  ["question", "info", "info", "other"]);
+
+// Google's rounded searches as a number, for the bars
+assert.deepStrictEqual(["20K+", "۲ هزار+", "1.5M", ""].map(api.trafficNumber), [20000, 2000, 1500000, 0]);
 
 // «خروجی»: the BOM, quoting, and no cell that Excel would run as a formula
 const csv = api.newsCsv(["تیتر", "تأخیر"], [
@@ -68,12 +91,11 @@ assert.strictEqual(rank.cut, 1);
 assert.ok(rank.rows.every((r) => r.ours || r.stories.length === r.covered));
 assert.strictEqual(api.newsMediaRank(hotStories, ["other.ir"]).rows.find((r) => r.ours).first, null);
 
-// The story prompts (panel.js, which needs a browser: only the block from NO_ANGLES to addAngles is run here). Each
-// kind names its story and its links, says what only it says, and keeps one place for «مردم چه می‌پرسند؟».
+// The story prompts (lib.js). Each kind names its story and its links, says what only it says, and keeps one place for
+// «مردم چه می‌پرسند؟».
 const panel = fs.readFileSync(path.join(__dirname, "..", "panel.js"), "utf8");
-const prompts = vm.createContext({ fa: (n) => String(n), esc: (s) => String(s) });
-vm.runInContext(panel.slice(panel.indexOf("const NO_ANGLES"), panel.indexOf("// the card's copy carries")) + "this.out = { storyPrompt, NO_ANGLES, PROMPT_OUTPUT, PROMPT_KINDS, PROMPT_FORMATS, promptAs };", prompts);
-const { storyPrompt, NO_ANGLES, PROMPT_OUTPUT, PROMPT_KINDS, PROMPT_FORMATS, promptAs } = prompts.out;
+const { storyPrompt, NO_ANGLES, PROMPT_OUTPUT, PROMPT_KINDS, PROMPT_FORMATS, promptAs } =
+  vm.runInContext("({ storyPrompt, NO_ANGLES, PROMPT_OUTPUT, PROMPT_KINDS, PROMPT_FORMATS, promptAs })", api);
 const story = { title: "قیمت دلار", sources: 4, firstSource: "ایسنا", items: [{ source: "ایسنا", title: "دلار گران شد", url: "https://a.example/1" }],
   competitors: ["رقیب یک", "رقیب دو"], covers: [{ source: "زومیت", title: "تیتر فارسی", url: "https://z.example/2" }] };
 const only = { new: "مطلب تازه و مستقل", update: "[نشانی یا متن مطلب خودتان را این‌جا بگذارید]", gap: "رقیب یک، رقیب دو", foreign: "https://z.example/2" };
@@ -130,16 +152,89 @@ assert.ok(storyPrompt({ title: "Nvidia", sources: 2, items: [{ source: "Reuters"
 }
 
 // The clicked notification's stories (panel.js showTold … refreshTold): no «من می‌نویسم» from the mark the background
-// saw, only from the story as the server has it now; a foreign notification asks only the foreign list.
+// saw, only from the story as the server has it now. The lists are api.js newsAlertLists: one request to a server with
+// api/News/alerts, list by list to one without it (404), and nothing from a server that does not answer.
 (async () => {
   const text = panel.replace(/\r\n/g, "\n");
   const asked = [];
-  const lists = { "topics?hours=3&minSources=1": [{ id: 1, title: "a", mark: { status: "taken", by: "همکار" } }], "gap?siteId=7&hours=6": [{ id: 2, title: "b", mark: null }] };
+  const lists = { "topics?hours=3&minSources=1": [{ id: 1, title: "a", mark: { status: "taken", by: "همکار" } }], "gap?siteId=7&hours=6": [{ id: 2, title: "b", mark: null }], "foreign?hours=6": [{ id: 3, title: "c", mark: null }] };
+  let alerts = { status: 404 }, down = false;
+  api.newsApi = async (p) => (asked.push(p), p.startsWith("alerts") ? alerts : lists[p] && !down ? { status: 200, data: { now: "n", stories: lists[p] } } : { status: 500 });
+  const sites = [{ id: 7, domain: "a.ir", hasFeed: true, competitors: 2 }, { id: 8 }];
+  const old = await api.newsAlertLists({ sites, foreignNews: true }, { hours: 6 });
+  assert.strictEqual(JSON.stringify([old.now, old.gaps.map((g) => [g.site.id, g.stories.length]), old.watch.map((w) => w.tab), old.foreign.length]), '["n",[[7,1]],["topics"],1]');
+  assert.ok(!asked.some((p) => p.includes("siteId=8")));
+  alerts = { status: 200, data: { now: "n", gaps: [{ siteId: 7, domain: "a.ir", stories: [] }], topics: lists["topics?hours=3&minSources=1"], telegram: [], foreign: null } };
+  asked.length = 0;
+  const one = await api.newsAlertLists({ sites }, { hours: 6 });
+  assert.deepStrictEqual(asked, ["alerts?hours=6"]);
+  assert.strictEqual(JSON.stringify([one.gaps[0].site, one.watch.map((w) => [w.tab, w.stories.length]), one.foreign]), '[{"id":7,"domain":"a.ir"},[["topics",1],["telegram",0]],null]');
+  alerts = { status: 0 };
+  assert.strictEqual(await api.newsAlertLists({ sites }, { hours: 6 }), null);
+  // an alerts that fails on the server does not silence the lists that answer; with none answering, nothing
+  alerts = { status: 500 };
+  assert.strictEqual((await api.newsAlertLists({ sites }, { hours: 6 })).gaps.length, 1);
+  down = true;
+  assert.strictEqual(await api.newsAlertLists({ sites }, { hours: 6 }), null);
+  down = false;
+  alerts = { status: 404 };
+  asked.length = 0;
+
+  // background.js, on a chrome that does nothing but keep the storage and the notifications told. One story is in the
+  // gap of site 7. Two rounds asked at once are one round and one notification, with «من می‌نویسم» on it; a gap the
+  // panel marks seen while a round reads is still seen after it; and in «ساعت سکوت» a new story is told neither then
+  // nor later.
+  {
+    const areas = { local: { newsSeen: { started: true, gap: [], watch: [], notified: [] } }, sync: {}, session: {} };
+    const area = (data) => ({
+      get: async (keys) => Object.fromEntries([keys].flat().filter((k) => k in data).map((k) => [k, structuredClone(data[k])])),
+      set: async (values) => { Object.assign(data, structuredClone(values)); },
+      remove: async (keys) => { [keys].flat().forEach((k) => delete data[k]); },
+    });
+    const notes = [], badge = [];
+    // any other chrome.x.y(...): calls a callback it is given (not a listener) and answers nothing
+    const idle = (called) => new Proxy(function () {}, {
+      get: (_, name) => (name === "then" ? undefined : idle(name)),
+      apply: (_, __, args) => { if (called !== "addListener") args.findLast((a) => typeof a === "function")?.(); return Promise.resolve(undefined); },
+    });
+    const chrome = new Proxy({
+      storage: { local: area(areas.local), sync: area(areas.sync), session: area(areas.session), onChanged: idle() },
+      notifications: { create: (id, options) => notes.push(options), clear() {}, onClicked: idle(), onButtonClicked: idle() },
+      action: { setBadgeText: async ({ text }) => { badge.push(text); }, setBadgeBackgroundColor: async () => {}, onClicked: idle() },
+    }, { get: (target, name) => target[name] ?? idle() });
+    const bg = vm.createContext({ chrome, console, importScripts() {}, structuredClone });
+    for (const file of ["api.js", "background.js"]) vm.runInContext(fs.readFileSync(path.join(__dirname, "..", file), "utf8"), bg);
+    let gapStories = [{ id: 1, title: "x", mark: null, items: [{ title: "x", domain: "b.ir" }] }], hold = Promise.resolve();
+    bg.newsApi = async (p) => {
+      if (p === "state") return { status: 200, data: { access: { role: "member" }, sites } };
+      await hold;
+      return { status: 200, data: { now: "n", gaps: [{ siteId: 7, domain: "a.ir", stories: gapStories }], topics: [], telegram: [], foreign: null } };
+    };
+    await Promise.all([bg.poll(false), bg.poll(false)]);
+    assert.strictEqual(notes.length, 1);
+    assert.strictEqual(notes[0].buttons?.[0].title, "من می‌نویسم");
+    assert.strictEqual(badge.at(-1), "1");
+    let release;
+    hold = new Promise((done) => { release = done; });
+    const round = bg.poll(false);
+    await new Promise((done) => setTimeout(done, 5));
+    await bg.markGapSeen(["7:1"]);
+    release();
+    await round;
+    assert.ok(areas.local.newsSeen.gap.includes("7:1") && badge.at(-1) === "");
+    const hour = new Date().getHours();
+    areas.sync.newsPrefs = { quietFrom: hour, quietTo: (hour + 1) % 24 };
+    gapStories = [...gapStories, { id: 2, title: "y", mark: null, items: [{ title: "y", domain: "b.ir" }] }];
+    await bg.poll(false);
+    areas.sync.newsPrefs = {};
+    await bg.poll(false);
+    assert.strictEqual(notes.length, 1);
+    assert.ok(areas.local.newsSeen.notified.includes("7:2") && badge.at(-1) === "1");
+  }
   const box = { hidden: true, innerHTML: "", scrollIntoView() {} };
   const ctx = vm.createContext({
-    toldBox: box, esc: String, newsOnOurSite: api.newsOnOurSite, NEWS_WATCH_PATHS: api.NEWS_WATCH_PATHS, NEWS_FOREIGN_WATCH_PATH: api.NEWS_FOREIGN_WATCH_PATH, takenBadge: () => "", state: { access: {}, sites: [{ id: 7, hasFeed: true, competitors: 2 }, { id: 8 }] },
+    toldBox: box, esc: String, newsOnOurSite: api.newsOnOurSite, newsAlertLists: api.newsAlertLists, takenBadge: () => "", state: { access: {}, sites, foreignNews: true },
     newsPrefs: async () => ({ hours: 6 }),
-    newsApi: async (p) => (asked.push(p), lists[p] ? { status: 200, data: { stories: lists[p] } } : { status: 500 }),
     // a row: the story's id, and «+» when it would carry the button
     dashStory: (s) => `${s.id}${"mark" in s && s.mark?.status !== "taken" ? "+" : ""},`,
   });
@@ -151,10 +246,10 @@ assert.ok(storyPrompt({ title: "Nvidia", sources: 2, items: [{ source: "Reuters"
   await new Promise((done) => setTimeout(done, 10));
   // 1 was taken since, 2 is still free, 3 is on no list any more
   assert.strictEqual(rows(), "1,2+,3,");
-  assert.ok(asked.includes("gap?siteId=7&hours=6") && !asked.some((p) => p.includes("siteId=8") || p.startsWith("foreign")));
-  asked.length = 0;
+  assert.ok(asked.includes("gap?siteId=7&hours=6"));
+  // a foreign notification's stories are looked for in the foreign list only: 3 is there, free
   ctx.out.showTold({ tab: "global", title: "t", stories: stale });
   await new Promise((done) => setTimeout(done, 10));
-  assert.deepStrictEqual(asked, ["foreign?hours=6"]);
+  assert.strictEqual(rows(), "1,2,3+,");
   console.log("ok");
 })().catch((error) => { console.error(error); process.exit(1); });

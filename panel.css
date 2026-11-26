@@ -215,6 +215,8 @@ body.page .dash-grid { columns: 360px; column-gap: 10px }
 body.page .dash-grid .card { margin: 0 0 10px; break-inside: avoid }
 body.page .bar { height: 10px }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px }
+/* the card the keyboard is on (J/K) */
+article.card:has(:focus-visible) { border-color: var(--brand) }
 /* The full page's menu: every list in one column beside the content, the sections as headings (panel.js renderNav). The
    side panel keeps its two rows: it has no width to spare. The outer columns centre the 1232px of menu and content. */
 body.page { display: grid; grid-template-columns: max(0px, calc((100% - 1232px) / 2)) 190px minmax(0, 1fr) max(0px, calc((100% - 1232px) / 2)); align-items: start }

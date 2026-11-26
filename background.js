@@ -13,12 +13,14 @@ newsView().then((view) => chrome.sidePanel.setPanelBehavior({ openPanelOnActionC
 // with the full-page view the side panel does not take the click and it comes here
 chrome.action.onClicked.addListener(() => newsOpenPage());
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
-});
-chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
-});
+// On every start of the worker too, not only on install and startup: Chrome may drop an alarm (an update, a restart),
+// and then nothing would wake the worker to make it again. An alarm that is there is left to its own timing.
+async function ensureAlarm() {
+  if (!(await chrome.alarms.get("news-poll"))) chrome.alarms.create("news-poll", { periodInMinutes: POLL_MINUTES, delayInMinutes: 1 });
+}
+ensureAlarm();
+chrome.runtime.onInstalled.addListener(ensureAlarm);
+chrome.runtime.onStartup.addListener(ensureAlarm);
 
 // The sign-in page returns to /extension/connected: ask for the token right away and tell an open panel.
 chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
@@ -43,10 +45,28 @@ chrome.notifications.onClicked.addListener(async (id) => {
   chrome.notifications.clear(id);
   const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
   const go = newsNotified[id];
-  if (!go?.tab) return;
+  // told before Chrome was closed (storage.session is gone) and left in the system's notification list: the app opens
+  if (!go?.tab) return newsOpenPage();
   const [view, win] = await Promise.all([newsView(), chrome.windows.getLastFocused().catch(() => null)]);
   // after these awaits sidePanel.open may refuse (no user gesture left): then the full page opens
   openAt(go, view === "panel", win?.id);
+});
+
+// «من می‌نویسم» on a notification of one story (notify). api/News/mark overwrites, and the notification may be an hour
+// old: the story is read again first, and marked only while it is still free. The notification then says what happened.
+chrome.notifications.onButtonClicked.addListener(async (id) => {
+  const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
+  const story = newsNotified[id]?.stories?.[0];
+  if (!story) return newsOpenPage();
+  const say = (title) => chrome.notifications.create(id, { type: "basic", iconUrl: "icons/icon-128.png", title, message: String(story.title ?? "").slice(0, 300) });
+  const { newsState } = await chrome.storage.local.get("newsState");
+  const lists = newsState && await newsAlertLists(newsState, await newsPrefs());
+  if (!lists) return say("ثبت نشد؛ جت‌سئو پاسخ نداد");
+  const now = [...lists.gaps, ...lists.watch, { stories: lists.foreign }].flatMap((l) => l.stories ?? []).find((s) => String(s.id) === String(story.id));
+  if (!now) return say("این سوژه دیگر در فهرست نیست");
+  if (now.mark) return say(now.mark.status === "taken" ? `این سوژه را ${now.mark.by || "یکی از اعضا"} برداشته است` : "این سوژه را تیم رد کرده است");
+  const res = await newsApi(`mark?storyId=${encodeURIComponent(story.id)}&status=taken`, "POST");
+  say(res.status === 200 ? "به تیم گفته شد: شما می‌نویسید" : "ثبت نشد؛ از داخل برنامه دوباره بزنید");
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -83,8 +103,15 @@ async function menus(sites) {
   chrome.contextMenus.create({ id: `link|${view}`, title: "بررسی سئوی این لینک (جت‌سئو نیوز)", contexts: ["link"], targetUrlPatterns: patterns }, quiet);
 }
 
+// One round at a time: the alarm, the sign-in and the panel may all ask within the same seconds, and two rounds that
+// read the same newsSeen would tell the same stories twice. A call during a round gets that round.
+let polling = null;
+function poll(first) {
+  return (polling ??= pollOnce(first).catch(console.error).finally(() => { polling = null; }));
+}
+
 // first: right after sign-in, when everything already there counts as seen (no flood of old stories).
-async function poll(first) {
+async function pollOnce(first) {
   const state = await newsApi("state");
   if (state.status !== 200 || !state.data?.access) {
     await chrome.action.setBadgeText({ text: "" });
@@ -98,25 +125,27 @@ async function poll(first) {
   const skipped = await newsSkipped();
   const { newsSeen = { gap: [], watch: [], started: false } } = await chrome.storage.local.get("newsSeen");
   const quiet = first || !newsSeen.started;
+  // «ساعت سکوت»: nothing is told, and what came then is not told afterwards either; the icon's number and the lists have it
+  const mute = newsMuted(prefs, new Date().getHours());
+  const lists = await newsAlertLists(state.data, prefs);
+  // no answer this round: everything stays as it is
+  if (!lists) return;
   const gapSeen = new Set(newsSeen.gap);
   const watchSeen = new Set(newsSeen.watch);
   const newGaps = [];
-  let unseenGaps = 0;
+  const unseenGaps = [];
   // for «سوژه بی‌صاحب»: the gaps and the watched stories with no mark of the team (neither taken nor dismissed) that no
   // team's site has, by story id. Only from a server that sends the team's marks: without them every story would look free.
   const open = new Map();
   const free = (story) => { if ("mark" in story && !story.mark && !story.ours) open.set(String(story.id), story); };
 
-  for (const site of state.data.sites ?? []) {
-    if (!site.hasFeed || !site.competitors) continue;
-    const gap = await newsApi(`gap?siteId=${site.id}&hours=${prefs.hours}`);
-    if (gap.status !== 200) continue;
-    for (const story of newsPersonal(gap.data.stories, prefs)) {
+  for (const { site, stories } of lists.gaps) {
+    for (const story of newsPersonal(stories, prefs)) {
       const key = `${site.id}:${story.id}`;
       if (skipped.has(key)) continue;
       free(story);
       if (!gapSeen.has(key)) {
-        unseenGaps++;
+        unseenGaps.push(key);
         if (!newsSeen.notified?.includes(key)) newGaps.push({ key, site: site.domain, siteId: site.id, story });
       }
     }
@@ -124,21 +153,16 @@ async function poll(first) {
 
   // a watched word in a story the sites tell, or in one only Telegram channels tell so far
   const newWatch = [];
-  for (const path of NEWS_WATCH_PATHS) {
-    const res = await newsApi(path);
-    if (res.status !== 200) continue;
-    for (const story of newsPersonal(res.data.stories, prefs).filter((s) => s.watch)) {
+  for (const { tab, stories } of lists.watch) {
+    for (const story of newsPersonal(stories, prefs).filter((s) => s.watch)) {
       free(story);
-      if (!watchSeen.has(String(story.id)) && !newWatch.some((w) => w.id === story.id)) newWatch.push({ ...story, tab: path.startsWith("telegram") ? "telegram" : "topics" });
+      if (!watchSeen.has(String(story.id)) && !newWatch.some((w) => w.id === story.id)) newWatch.push({ ...story, tab });
     }
   }
 
   // and in a story of the foreign media («رسانه‌های خارجی»): a Latin word, «openai», matches the English headlines as it is
-  if (state.data.foreignNews) {
-    const res = await newsApi(NEWS_FOREIGN_WATCH_PATH);
-    for (const story of res.status === 200 ? newsGlobal(res.data.stories, prefs).filter((s) => s.watch) : []) {
-      if (!watchSeen.has(String(story.id))) newWatch.push({ ...story, tab: "global" });
-    }
+  for (const story of newsGlobal(lists.foreign, prefs).filter((s) => s.watch)) {
+    if (!watchSeen.has(String(story.id))) newWatch.push({ ...story, tab: "global" });
   }
 
   // «سوژه بی‌صاحب»: free for UNCLAIMED_MINUTES since this browser first saw it, told once. newsWaiting is
@@ -155,13 +179,13 @@ async function poll(first) {
     }
   }
   await chrome.storage.local.set({ newsWaiting: waiting });
-  if (!quiet && overdue.length) {
+  if (!quiet && !mute && overdue.length) {
     await notify(overdue.length === 1 ? "سوژه بی‌صاحب: هنوز کسی برنداشته" : `${overdue.length} سوژه بی‌صاحب: هنوز کسی برنداشته`,
       overdue.slice(0, 3).map((s) => s.title).join("\n"), { tab: "dash", stories: told(overdue) });
   }
 
   const notified = new Set(newsSeen.notified ?? []);
-  if (!quiet) {
+  if (!quiet && !mute) {
     if (prefs.notifyGap && newGaps.length) {
       const top = newGaps[0];
       await notify(
@@ -178,15 +202,19 @@ async function poll(first) {
   newGaps.forEach((g) => notified.add(g.key));
   // on the quiet first round the current gaps are the baseline: seen, not news
   const gapBaseline = quiet ? newGaps.map((g) => g.key) : [];
+  // The gaps seen are read again: while this round was reading the lists, the panel may have opened «شکاف پوشش»
+  // (markGapSeen), and the list read at the start would undo that and bring the icon's number back.
+  const { newsSeen: latest = newsSeen } = await chrome.storage.local.get("newsSeen");
+  const gapNow = new Set([...(latest.gap ?? []), ...gapBaseline]);
   await chrome.storage.local.set({
     newsSeen: {
       started: true,
-      gap: [...gapSeen, ...gapBaseline].slice(-SEEN_MAX),
+      gap: [...gapNow].slice(-SEEN_MAX),
       watch: [...watchSeen, ...newWatch.map((s) => String(s.id))].slice(-SEEN_MAX),
       notified: [...notified].slice(-SEEN_MAX),
     },
   });
-  const badge = quiet ? 0 : unseenGaps;
+  const badge = quiet ? 0 : unseenGaps.filter((key) => !gapNow.has(key)).length;
   await chrome.action.setBadgeBackgroundColor({ color: "#dc2626" });
   await chrome.action.setBadgeText({ text: badge > 0 ? String(Math.min(badge, 99)) : "" });
 }
@@ -206,12 +234,14 @@ const told = (stories) => stories.slice(0, 30).map((s) => ({
   ...("mark" in s ? { mark: s.mark } : {}),
 }));
 
-// go: where its click opens the app ({ tab, siteId, stories }); the title goes with it, as the heading of its stories
+// go: where its click opens the app ({ tab, siteId, stories }); the title goes with it, as the heading of its stories.
+// A notification of one story nobody marked gets «من می‌نویسم» (onButtonClicked); of several, a button could not say which.
 async function notify(title, message, go) {
   go = { ...go, title };
+  const one = go.stories?.length === 1 && "mark" in go.stories[0] && !go.stories[0].mark;
   const id = `news-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const { newsNotified = {} } = await chrome.storage.session.get("newsNotified").catch(() => ({}));
   const keep = Object.entries(newsNotified).slice(-30);
   await chrome.storage.session.set({ newsNotified: Object.fromEntries([...keep, [id, go]]) }).catch(() => {});
-  chrome.notifications.create(id, { type: "basic", iconUrl: "icons/icon-128.png", title, message: message.slice(0, 300), priority: 1 });
+  chrome.notifications.create(id, { type: "basic", iconUrl: "icons/icon-128.png", title, message: message.slice(0, 300), priority: 1, ...(one ? { buttons: [{ title: "من می‌نویسم" }] } : {}) });
 }
