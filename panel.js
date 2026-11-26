@@ -155,13 +155,13 @@ const ROLES = {
   media: { name: "چندرسانه‌ای", text: "برای سوژه‌ها ویدئو، عکس یا اینفوگرافیک می‌سازم.", hidden: ["gap", "global", "keywords", "wiki", "days", "mine"], unclaimed: false, simple: true },
   all: { name: "همه امکانات", text: "همه فهرست‌ها را می‌خواهم؛ خودم انتخاب می‌کنم.", hidden: [], unclaimed: null },
 };
-// null leaves «سوژه بی‌صاحب» as it was (on for the subscription's owner: background.js)
-const rolePrefs = (key) => ({ role: key, hiddenTabs: ROLES[key].hidden, ...(ROLES[key].unclaimed == null ? {} : { notifyUnclaimed: ROLES[key].unclaimed }) });
 const roleButtons = (current) => Object.entries(ROLES).map(([key, r]) =>
   `<button type="button" class="role${key === current ? " on" : ""}" data-role="${key}" aria-pressed="${key === current}"><b>${r.name}</b><span class="muted">${r.text}</span></button>`).join("");
 async function chooseRole(key) {
-  await saveNewsPrefs(rolePrefs(key));
-  hiddenTabs = ROLES[key].hidden;
+  const role = ROLES[key];
+  // unclaimed null leaves «سوژه بی‌صاحب» as it was (on for the subscription's owner: background.js)
+  await saveNewsPrefs({ role: key, hiddenTabs: role.hidden, ...(role.unclaimed == null ? {} : { notifyUnclaimed: role.unclaimed }) });
+  hiddenTabs = role.hidden;
   if (!tabAvailable(tab)) tab = "dash";
 }
 function showRoles() {
@@ -579,29 +579,43 @@ function cardShell({ title, url, ltr = false, count, badges = [], meta = "", mai
 // «دنبال کن» under a story's «جزئیات»: the word joins «کلیدواژه‌های تحت نظر من» without a visit to the settings.
 // «نشان نده» beside a source there: its site joins «منابع بی‌صدا», and the list is drawn again without it.
 const WORDS_MAX = 100;
-main.addEventListener("click", async (e) => {
-  const follow = e.target.closest("button[data-follow]");
-  const mute = e.target.closest("a[data-mute]");
-  if (!follow && !mute) return;
-  e.preventDefault();
+// a full list takes no more: said, not dropped while the line at the foot says it was added
+function listFull(list) {
+  if (list.length < WORDS_MAX) return false;
+  toast(`فهرست شما پر است (${fa(WORDS_MAX)} مورد)؛ در «تنظیمات» چیزی را بردارید.`);
+  return true;
+}
+async function muteSource(domain, name) {
   const prefs = await newsPrefs();
-  if (mute) {
-    const domain = mute.dataset.mute.toLowerCase();
-    await saveNewsPrefs({ muted: [...new Set([...prefs.muted, domain])].slice(0, WORDS_MAX) });
+  if (listFull(prefs.muted)) return;
+  await saveNewsPrefs({ muted: [...new Set([...prefs.muted, domain])] });
+  show(tab);
+  toast(`خبرهای ${name} دیگر نشان داده نمی‌شود.`, async () => {
+    await saveNewsPrefs({ muted: (await newsPrefs()).muted.filter((d) => d !== domain) });
     show(tab);
-    return toast(`خبرهای ${mute.dataset.name} دیگر نشان داده نمی‌شود.`, async () => {
-      await saveNewsPrefs({ muted: (await newsPrefs()).muted.filter((d) => d !== domain) });
-      show(tab);
-    });
-  }
-  const input = follow.parentElement.querySelector("input");
+  });
+}
+async function followWord(input) {
   const word = input.value.trim();
   if (!word) return input.focus();
-  await saveNewsPrefs({ watch: [...new Set([...prefs.watch, word])].slice(0, WORDS_MAX) });
   input.value = "";
+  const prefs = await newsPrefs();
+  // followed before: its «برگردان» would take away a word this click did not add
+  if (prefs.watch.some((w) => newsFold(w) === newsFold(word))) return toast(`«${word}» را از قبل دنبال می‌کنید.`);
+  if (listFull(prefs.watch)) return;
+  await saveNewsPrefs({ watch: [...prefs.watch, word] });
   toast(`«${word}» دنبال می‌شود: سوژه‌هایش برچسب می‌گیرند و هشدار می‌دهند.`, async () => {
     await saveNewsPrefs({ watch: (await newsPrefs()).watch.filter((w) => w !== word) });
   });
+}
+main.addEventListener("click", (e) => {
+  const mute = e.target.closest("a[data-mute]");
+  if (mute) {
+    e.preventDefault();
+    return muteSource(mute.dataset.mute.toLowerCase(), mute.dataset.name);
+  }
+  const follow = e.target.closest("button[data-follow]");
+  if (follow) followWord(follow.parentElement.querySelector("input"));
 });
 // Enter in the box is the button
 main.addEventListener("keydown", (e) => {
@@ -1802,11 +1816,11 @@ async function showSettings() {
       <p class="muted" style="margin:0">${text}</p>
       <div class="chips"></div>
       <div class="add"><input id="w-${key}" type="text" placeholder="${placeholder}"${ltr ? ` dir="ltr"` : ""} /><button class="btn ghost small" type="button">افزودن</button></div></div>`;
-  main.innerHTML = `<section class="card">
+  main.innerHTML = `${state?.access ? `<section class="card">
       <h3>نقش من</h3>
       <p class="muted" style="margin:0">نقش فقط تعیین می‌کند کدام فهرست‌ها را ببینید؛ با عوض کردنش فهرست‌های پایین هم عوض می‌شوند. «همه امکانات» چیزی را برنمی‌دارد.</p>
       <div class="role-list">${roleButtons(prefs.role)}</div>
-    </section>
+    </section>` : ""}
     <section class="card">
       <h3>کلمه‌ها و منابع من</h3>
       <p class="muted" style="margin:0">فقط برای خودتان. فیلترهای تیم (برای همه اعضا) در پنل جت‌سئو هستند${owner ? `: <a href="${safeUrl((state?.panelUrl ?? "") + "?tab=filters")}" target="_blank" rel="noopener">فیلترهای تیم</a>` : ""}.</p>
@@ -1861,6 +1875,7 @@ async function showSettings() {
   document.getElementById("signout").onclick = async (e) => {
     e.preventDefault();
     await newsSignOut();
+    tab = "dash";
     signedOut();
   };
   // the shortcut actually set: the user may have changed it, and Chrome leaves the suggested one unset on a conflict
@@ -1891,10 +1906,11 @@ async function showSettings() {
   for (const input of main.querySelectorAll("input[type=checkbox], select")) input.onchange = save;
 
   // a site as the filters compare it: «https://www.Example.ir/news» is «example.ir»
-  const clean = { muted: (d) => d.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "") };
+  const siteOf = (d) => d.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
   for (const box of main.querySelectorAll(".words")) {
     const key = box.dataset.words;
     const input = box.querySelector("input");
+    const tidy = key === "muted" ? siteOf : (w) => w;
     const draw = () => {
       box.querySelector(".chips").innerHTML = words[key].length ? words[key].map((w, n) =>
         `<span class="chip word"${key === "muted" ? ` dir="ltr"` : ""}>${esc(w)}<button type="button" data-drop="${n}" aria-label="حذف ${esc(w)}" title="حذف">×</button></span>`).join("")
@@ -1902,12 +1918,14 @@ async function showSettings() {
     };
     // several at once, pasted with commas or lines, are taken too
     const add = () => {
-      const fresh = input.value.split(/[,،\n]/).map((x) => (clean[key] ?? ((w) => w))(x.trim())).filter(Boolean);
+      const fresh = input.value.split(/[,،\n]/).map((x) => tidy(x.trim())).filter(Boolean);
       if (!fresh.length) return input.focus();
-      words[key] = [...new Set([...words[key], ...fresh])].slice(0, WORDS_MAX);
+      const all = [...new Set([...words[key], ...fresh])];
+      words[key] = all.slice(0, WORDS_MAX);
       input.value = "";
       draw();
-      save();
+      // save's «ذخیره شد» comes after its await, so it would cover this: said once the save is done
+      save().then(() => { if (all.length > WORDS_MAX) toast(`این فهرست بیش از ${fa(WORDS_MAX)} مورد نمی‌گیرد؛ بقیه اضافه نشد.`); });
     };
     box.querySelector(".add button").onclick = add;
     input.onkeydown = (e) => { if (e.key === "Enter") add(); };
@@ -1923,7 +1941,8 @@ async function showSettings() {
   }
 
   // a new role sets the lists again, and the page is drawn with them
-  main.querySelector(".role-list").onclick = async (e) => {
+  const roles = main.querySelector(".role-list");
+  if (roles) roles.onclick = async (e) => {
     const key = e.target.closest("[data-role]")?.dataset.role;
     if (!key) return;
     await chooseRole(key);
